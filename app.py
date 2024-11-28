@@ -6,6 +6,8 @@ from src.data_parser import BMDataParser
 from src.bluetooth_manager import BMPatientMonitor
 from config import get_config
 import sys
+import certifi
+import os
 
 class VitalsMonitor:
     def __init__(self):
@@ -33,7 +35,8 @@ class VitalsMonitor:
             key=self.credentials['key'],
             secret=self.credentials['secret'],
             cluster=self.credentials['cluster'],
-            ssl=True
+            ssl=True,
+            ca_certs=certifi.where()
         )
         
         # Initialize Pysher for receiving events - PROPER PRIVATE CHANNEL SETUP
@@ -41,7 +44,9 @@ class VitalsMonitor:
         self.pusher_client = pysher.Pusher(
             key=self.credentials['key'],
             cluster=self.credentials['cluster'],
-            secret=self.credentials['secret']  # Add secret for private channels
+            secret=self.credentials['secret'],
+            ssl=True,
+            ca_certs=certifi.where()
         )
         
         # Create auth function for private channels
