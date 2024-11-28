@@ -117,7 +117,12 @@ class VitalsMonitor:
             
             if urgent_care_id:
                 self.target_channel = f"private-urgent-care.{urgent_care_id}"
-                print(f"[DEBUG] Setting up {self.target_channel} as target channel")
+                self.current_channel = self.pusher_client.subscribe(self.target_channel)
+                if self.current_channel:
+                    self.current_channel.bind('doctor.video.end', self.handle_stop_sending_data)
+                    print(f"[DEBUG] Setting up {self.target_channel} as target channel")
+                else:
+                    print(f"[ERROR] Failed to subscribe to {self.target_channel}")
             else:
                 print("[ERROR] Received share event without urgentCareId")
                 
@@ -125,6 +130,15 @@ class VitalsMonitor:
             print("[ERROR] Invalid JSON in share event")
         except Exception as e:
             print(f"[ERROR] Error processing share event: {e}")
+
+    def handle_stop_sending_data(self, event_data):
+        """Handle the stop sending data event"""
+        try:
+            self.pusher_client.unsubscribe(self.current_channel)
+            self.target_channel = None
+            print(f"[DEBUG] TARGET CHANNEL SETTED AS NONE")
+        except Exception as e:
+            print(f"[ERROR] Error processing stop sending data event: {e}")
 
     async def send_data(self):
         """Send data to the appropriate channel"""
@@ -163,21 +177,34 @@ class VitalsMonitor:
         if not data or not isinstance(data, dict):
             return False
         
+        # Check vital signs
         vital_signs = data.get('vitalSigns', {})
         if not vital_signs:
             return False
         
-        # Check if all values are empty/default
-        default_values = {'- -', '- - /- -'}
-        return not all(
+        # Check if all vital signs are empty/default
+        default_values = {'-', '- -', '- - /- -'}
+        all_vitals_empty = all(
             str(value) in default_values 
             for value in vital_signs.values()
         )
+            
+        # Check waveforms
+        spo2_empty = all(v == 0 for v in data.get('spo2', []))
+        ecg_empty = len(data.get('ecg', [])) == 0
+        resp_empty = len(data.get('resp', [])) == 0
+        
+        # Data is valid only if we have some vital signs OR some non-zero waveform data
+        return not (all_vitals_empty and spo2_empty and ecg_empty and resp_empty)
 
     async def run(self):
         try:
             print("\n[BERRY] Attempting to connect to Berry device...")
-            await self.monitor.connect()
+            connected = await self.monitor.connect()
+            if not connected:
+                return
+            
+            asyncio.create_task(self.send_data())
             print("[BERRY] Connection successful, starting data monitoring...")
             while True:
                 await asyncio.sleep(0.1)
