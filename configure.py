@@ -13,7 +13,8 @@ def setup_credentials():
         'PUSHER_APP_ID': input("App ID: ").strip(),
         'PUSHER_KEY': input("Key: ").strip(),
         'PUSHER_SECRET': getpass.getpass("Secret: ").strip(),
-        'PUSHER_CLUSTER': input("Cluster (default 'us2'): ").strip() or 'us2'
+        'PUSHER_CLUSTER': input("Cluster (default 'us2'): ").strip() or 'us2',
+        'TOTEM_ID': input("Totem ID: ").strip()
     }
     
     try:

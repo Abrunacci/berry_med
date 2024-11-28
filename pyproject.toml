@@ -13,6 +13,8 @@ websockets = "^14.1"
 python-dotenv = "^1.0.1"
 pusher = "^3.3.2"
 pyinstaller = "^6.11.1"
+pysher = "^1.0.8"
+requests = "^2.32.3"
 
 
 [build-system]
