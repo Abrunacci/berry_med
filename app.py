@@ -99,10 +99,10 @@ class VitalsMonitor:
         """Handler for successful connection"""
         print(f"[DEBUG] Connected to Pusher, subscribing to: {self.initial_channel}")
         try:
-            channel = self.pusher_subscriber.subscribe(self.initial_channel)
+            channel = self.pusher_client.subscribe(self.initial_channel)
             if channel:
-                print(f"[DEBUG] Successfully subscribed to {self.initial_channel}")
                 channel.bind('share_urgentcare_id', self.handle_share_event)
+                print(f"[DEBUG] Successfully subscribed to {self.initial_channel}")
                 print("[DEBUG] Waiting for share_urgentcare_id event...")
             else:
                 print("[ERROR] Failed to subscribe to initial channel")
@@ -117,14 +117,7 @@ class VitalsMonitor:
             
             if urgent_care_id:
                 self.target_channel = f"private-urgent-care.{urgent_care_id}"
-                print(f"[DEBUG] Switching to target channel: {self.target_channel}")
-                
-                # Subscribe to new channel
-                channel = self.pusher_subscriber.subscribe(self.target_channel)
-                if channel:
-                    print(f"[DEBUG] Successfully subscribed to target channel")
-                    # Add any bindings needed for the target channel
-                    # channel.bind('some-event', self.handle_target_channel_event)
+                print(f"[DEBUG] Setting up {self.target_channel} as target channel")
             else:
                 print("[ERROR] Received share event without urgentCareId")
                 
@@ -138,8 +131,10 @@ class VitalsMonitor:
         while True:
             try:
                 data = self.data_parser.get_current_data()
-                channel = self.target_channel or self.initial_channel
-                
+                channel = self.target_channel
+                if not channel:
+                    print("[ERROR] No target channel set - cannot send data")
+                    continue
                 self.pusher_server.trigger(
                     channels=[channel],
                     event_name='vitals-event',
@@ -153,49 +148,12 @@ class VitalsMonitor:
 
     async def run(self):
         try:
-            # Instead of connecting to Berry device, we'll just start sending test data
-            print("Starting test mode - no Berry device connected")
-            asyncio.create_task(self.send_test_data())
+            print("Connecting to Berry device...")
+            await self.monitor.connect()
             while True:
                 await asyncio.sleep(0.1)
         except Exception as e:
             print(f"Error: {str(e)}")
-
-    async def send_test_data(self):
-        """Simulates data sending for testing purposes"""
-        test_counter = 0
-        while True:
-            try:
-                # Simulate some varying vital signs
-                test_data = {
-                    "spo2": {
-                        "wave": [test_counter % 100],  # Simulated wave between 0-99
-                        "value": 98  # Normal SPO2
-                    },
-                    "vitalSigns": {
-                        "heartRate": 75 + (test_counter % 10),  # Varying heart rate
-                        "temperature": 36.5 + (test_counter % 10) / 10,  # Varying temperature
-                        "bloodPressure": {
-                            "systolic": 120,
-                            "diastolic": 80
-                        }
-                    }
-                }
-                
-                print("\nSending Test Data:")
-                print(json.dumps(test_data, indent=2))
-                
-                # Send using Pusher to private channel
-                self.pusher_server.trigger(
-                    channels=[self.channel_name],
-                    event_name='vitals-event',
-                    data=test_data
-                )
-                
-                test_counter += 1
-            except Exception as e:
-                print(f"Error sending test data: {e}")
-            await asyncio.sleep(2)  # Send data every 2 seconds
 
     def connect_error_handler(self, data):
         """Handler for connection error"""
