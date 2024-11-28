@@ -3,6 +3,7 @@ import shutil
 import os
 import time
 from pathlib import Path
+import certifi
 
 def remove_if_exists(path):
     if path.exists():
@@ -41,8 +42,11 @@ common_options = [
     '--hidden-import=asyncio',
     '--hidden-import=bleak',
     '--hidden-import=pusher',
+    '--hidden-import=pysher',
+    '--hidden-import=certifi',
     '--hidden-import=src.data_parser',
     '--hidden-import=src.bluetooth_manager',
+    '--add-data', f"{certifi.where()};certifi"
 ]
 
 try:
