@@ -66,8 +66,8 @@ class VitalsMonitor:
         self.target_channel = None  # Will be set when we receive the share event
 
     def status_callback(self, message: str):
-        if "Connected to BerryMed" in message:
-            print(message)
+        """Callback for device status updates"""
+        print(f"[BERRY STATUS] {message}")
 
     # Handler methods
     def handle_ecg_wave(self, value: int): pass
@@ -132,28 +132,57 @@ class VitalsMonitor:
             try:
                 data = self.data_parser.get_current_data()
                 channel = self.target_channel
+                
+                # Skip sending if no target channel
                 if not channel:
-                    print("[ERROR] No target channel set - cannot send data")
+                    print("[DEBUG] No target channel set - cannot send data")
+                    await asyncio.sleep(1)
                     continue
+                
+                # Skip empty or invalid data
+                if not self._is_valid_data(data):
+                    print("[DEBUG] Skipping invalid/empty data")
+                    await asyncio.sleep(1)
+                    continue
+                    
+                print("[DATA] Sending vital signs:")
+                print(json.dumps(data.get('vitalSigns', {}), indent=2))
+                
                 self.pusher_server.trigger(
                     channels=[channel],
                     event_name='vitals-event',
                     data=data
                 )
-                print(f"[DEBUG] Sent data to channel: {channel}")
                 
             except Exception as e:
                 print(f"[ERROR] Error sending data: {e}")
             await asyncio.sleep(1)
 
+    def _is_valid_data(self, data):
+        """Check if data contains any valid measurements"""
+        if not data or not isinstance(data, dict):
+            return False
+        
+        vital_signs = data.get('vitalSigns', {})
+        if not vital_signs:
+            return False
+        
+        # Check if all values are empty/default
+        default_values = {'- -', '- - /- -'}
+        return not all(
+            str(value) in default_values 
+            for value in vital_signs.values()
+        )
+
     async def run(self):
         try:
-            print("Connecting to Berry device...")
+            print("\n[BERRY] Attempting to connect to Berry device...")
             await self.monitor.connect()
+            print("[BERRY] Connection successful, starting data monitoring...")
             while True:
                 await asyncio.sleep(0.1)
         except Exception as e:
-            print(f"Error: {str(e)}")
+            print(f"[ERROR] Berry connection error: {str(e)}")
 
     def connect_error_handler(self, data):
         """Handler for connection error"""
