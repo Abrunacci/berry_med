@@ -36,7 +36,7 @@ class VitalsMonitor:
             secret=self.credentials['secret'],
             cluster=self.credentials['cluster'],
             ssl=True,
-            ca_certs=certifi.where()
+            
         )
         
         # Initialize Pysher for receiving events - PROPER PRIVATE CHANNEL SETUP
