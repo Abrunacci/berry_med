@@ -44,9 +44,7 @@ class VitalsMonitor:
         self.pusher_client = pysher.Pusher(
             key=self.credentials['key'],
             cluster=self.credentials['cluster'],
-            secret=self.credentials['secret'],
-            ssl=True,
-            ca_certs=certifi.where()
+            secret=self.credentials['secret']
         )
         
         # Create auth function for private channels
