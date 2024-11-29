@@ -9,12 +9,12 @@ A Python application that connects to BerryMed devices via Bluetooth LE and stre
 - Windows 10 or higher (for Bluetooth LE support)
 - BerryMed compatible device
 
-## Installation
+## Installation (DEVELOPMENT ONLY)
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/berry-integration.git
-cd berry-integration
+git clone git@github.com:Abrunacci/berry_med.git
+cd berry_med
 ```
 
 2. Install Poetry if you haven't already:
@@ -32,10 +32,7 @@ poetry install
 poetry run python configure.py
 ```
 
-## Running the Application
-
-### Development Mode
-
+5. Running the Application:
 ```bash
 poetry run python app.py
 ```
