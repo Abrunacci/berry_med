@@ -9,6 +9,10 @@ import sys
 import certifi
 import os
 
+
+os.environ['SSL_CERT_FILE'] = certifi.where()
+
+
 class VitalsMonitor:
     def __init__(self):
         self.data_parser = BMDataParser()
@@ -36,7 +40,6 @@ class VitalsMonitor:
             secret=self.credentials['secret'],
             cluster=self.credentials['cluster'],
             ssl=True,
-            
         )
         
         # Initialize Pysher for receiving events - PROPER PRIVATE CHANNEL SETUP
@@ -44,7 +47,8 @@ class VitalsMonitor:
         self.pusher_client = pysher.Pusher(
             key=self.credentials['key'],
             cluster=self.credentials['cluster'],
-            secret=self.credentials['secret']
+            secret=self.credentials['secret'],
+            ssl=True,
         )
         
         # Create auth function for private channels
@@ -104,7 +108,7 @@ class VitalsMonitor:
         try:
             channel = self.pusher_client.subscribe(self.initial_channel)
             if channel:
-                channel.bind('client-share_urgentcare_id', self.handle_share_event)
+                channel.bind('share_urgentcare_id', self.handle_share_event)
                 print(f"[DEBUG] Successfully subscribed to {self.initial_channel}")
                 print("[DEBUG] Waiting for share_urgentcare_id event...")
             else:
@@ -122,7 +126,7 @@ class VitalsMonitor:
                 self.target_channel = f"urgent-care.{urgent_care_id}"
                 self.current_channel = self.pusher_client.subscribe(self.target_channel)
                 if self.current_channel:
-                    self.current_channel.bind('client-doctor.video.end', self.handle_stop_sending_data)
+                    self.current_channel.bind('doctor.video.end', self.handle_stop_sending_data)
                     print(f"[DEBUG] Setting up {self.target_channel} as target channel")
                 else:
                     print(f"[ERROR] Failed to subscribe to {self.target_channel}")

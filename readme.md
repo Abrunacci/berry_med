@@ -27,12 +27,9 @@ curl -sSL https://install.python-poetry.org | python3
 poetry install
 ``` 
 
-4. Create a `.env` file in the root directory with your Pusher credentials:
-```env
-PUSHER_APP_ID=<your-app-id>
-PUSHER_KEY=<your-key>
-PUSHER_SECRET=<your-secret>
-PUSHER_CLUSTER=<your-cluster>
+4. Configure your Pusher credentials:
+```bash
+poetry run python configure.py
 ```
 
 ## Running the Application
@@ -43,38 +40,30 @@ PUSHER_CLUSTER=<your-cluster>
 poetry run python app.py
 ```
 
-### Building Executable
+### Building Executables
 
-1. Create the executable:
+1. First, build the configuration tool:
 ```bash
-poetry run pyinstaller --onefile --name berry-monitor app.py
+poetry run pyinstaller --noconfirm --onefile --clean --name berry-configure ^
+    --hidden-import=json ^
+    --hidden-import=getpass ^
+    --hidden-import=pathlib ^
+    configure.py
 ```
 
-The executable will be created in the `dist` directory as `berry-monitor.exe`.
-
-## Project Structure
-
+2. Then build the monitor application:
+```bash
+poetry run pyinstaller berry-monitor.spec
 ```
-berry-integration/
-├── app.py              # Main application
-├── config.py           # Configuration settings
-├── src/
-│   ├── data_parser.py    # Data parsing logic
-│   └── bluetooth_manager.py  # BLE connection handling
-├── .env               # Environment variables (not in repo)
-├── pyproject.toml    # Project dependencies
-└── README.md
-```
+
+The executables will be created in the `dist` directory:
+- `berry-configure.exe` - Configuration utility
+- `berry-monitor.exe` - Main monitoring application
 
 ## Usage
 
-1. Connect your BerryMed device and ensure it's powered on
-2. Run the executable `berry-monitor.exe`
-3. The application will:
-   - Automatically scan for BerryMed devices
-   - Connect to the first available device
-   - Start streaming vital signs data to Pusher
-   - Display connection status and data in the console
+1. Run `berry-configure.exe` first to set up your Pusher credentials
+2. Run `berry-monitor.exe` to start monitoring your BerryMed device
 
 ## Troubleshooting
 
@@ -85,10 +74,6 @@ berry-integration/
 
 2. **Missing DLL Errors**
    - Install the [Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)
-
-3. **Environment Variables**
-   - Verify your Pusher credentials in the `.env` file
-   - Make sure the `.env` file is in the same directory as the executable
 
 ## Dependencies
 
