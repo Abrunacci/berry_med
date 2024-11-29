@@ -58,7 +58,7 @@ class VitalsMonitor:
         
         self.pusher_client.authenticate = auth
         
-        self.channel_name = f"private-urgentcareid.share-{self.credentials['TOTEM_ID']}"
+        self.channel_name = f"urgentcareid.share-{self.credentials['TOTEM_ID']}"
         self.target_channel = None
         
         # Bind connection handlers for the client
@@ -67,7 +67,7 @@ class VitalsMonitor:
 
         # Initialize channel names
         self.totem_id = self.credentials['TOTEM_ID']
-        self.initial_channel = f"private-urgentcareid.share-{self.totem_id}"
+        self.initial_channel = f"urgentcareid.share-{self.totem_id}"
         self.target_channel = None  # Will be set when we receive the share event
 
     def status_callback(self, message: str):
@@ -106,7 +106,7 @@ class VitalsMonitor:
         try:
             channel = self.pusher_client.subscribe(self.initial_channel)
             if channel:
-                channel.bind('share_urgentcare_id', self.handle_share_event)
+                channel.bind('client-share_urgentcare_id', self.handle_share_event)
                 print(f"[DEBUG] Successfully subscribed to {self.initial_channel}")
                 print("[DEBUG] Waiting for share_urgentcare_id event...")
             else:
@@ -121,10 +121,10 @@ class VitalsMonitor:
             urgent_care_id = data.get('urgentCareId')
             
             if urgent_care_id:
-                self.target_channel = f"private-urgent-care.{urgent_care_id}"
+                self.target_channel = f"urgent-care.{urgent_care_id}"
                 self.current_channel = self.pusher_client.subscribe(self.target_channel)
                 if self.current_channel:
-                    self.current_channel.bind('doctor.video.end', self.handle_stop_sending_data)
+                    self.current_channel.bind('client-doctor.video.end', self.handle_stop_sending_data)
                     print(f"[DEBUG] Setting up {self.target_channel} as target channel")
                 else:
                     print(f"[ERROR] Failed to subscribe to {self.target_channel}")
@@ -169,7 +169,7 @@ class VitalsMonitor:
                 
                 self.pusher_server.trigger(
                     channels=[channel],
-                    event_name='vitals-event',
+                    event_name='client-vitals-event',
                     data=data
                 )
                 
