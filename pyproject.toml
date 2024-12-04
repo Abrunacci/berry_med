@@ -9,13 +9,10 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
 bleak = "^0.22.3"
-websockets = "^14.1"
-python-dotenv = "^1.0.1"
-pusher = "^3.3.2"
 pyinstaller = "^6.11.1"
 pysher = "^1.0.8"
-requests = "^2.32.3"
 certifi = "^2024.8.30"
+aiohttp = "^3.11.9"
 
 
 [build-system]

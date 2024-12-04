@@ -1,6 +1,8 @@
-from typing import Callable, Optional
-from bleak import BleakClient, BleakScanner
 import asyncio
+from typing import Callable, Optional
+
+from bleak import BleakClient, BleakScanner
+
 
 class BMPatientMonitor:
     def __init__(self, data_parser, status_callback: Callable):
@@ -9,7 +11,7 @@ class BMPatientMonitor:
         self.client: Optional[BleakClient] = None
         self.device = None
         self.connected = False
-        
+
         # BLE UUIDs
         self.DEVICE_NAME = "BerryMed"
         self.SERVICE_UUID = "49535343-fe7d-4ae5-8fa9-9fafd205e455"
@@ -24,15 +26,17 @@ class BMPatientMonitor:
         while True:
             try:
                 self.status_callback("Scanning for BerryMed device...")
-                
+
                 devices = await BleakScanner.discover()
                 for device in devices:
                     if device.name and self.DEVICE_NAME in device.name:
                         self.device = device
                         break
-                
+
                 if not self.device:
-                    self.status_callback("BerryMed device not found, retrying in 5 seconds...")
+                    self.status_callback(
+                        "BerryMed device not found, retrying in 5 seconds..."
+                    )
                     await asyncio.sleep(self.reconnect_interval)
                     continue
 
@@ -40,19 +44,20 @@ class BMPatientMonitor:
                 self.client = BleakClient(self.device)
                 await self.client.connect()
                 self.connected = True
-                
+
                 await asyncio.sleep(1)
-                
+
                 await self.client.start_notify(
-                    self.CHAR_RECEIVE_UUID,
-                    self._handle_data
+                    self.CHAR_RECEIVE_UUID, self._handle_data
                 )
 
                 self.status_callback("Connected to BerryMed")
                 return True
 
             except Exception as e:
-                self.status_callback(f"Connection error: {str(e)}, retrying in 5 seconds...")
+                self.status_callback(
+                    f"Connection error: {str(e)}, retrying in 5 seconds..."
+                )
                 self.connected = False
                 await asyncio.sleep(self.reconnect_interval)
 
@@ -64,7 +69,7 @@ class BMPatientMonitor:
 
     async def start_nibp(self):
         if self.client and self.client.is_connected:
-            command = bytearray([0x55, 0xaa, 0x04, 0x02, 0x01, 0xf8])
+            command = bytearray([0x55, 0xAA, 0x04, 0x02, 0x01, 0xF8])
             await self.client.write_gatt_char(self.CHAR_SEND_UUID, command)
 
     def _handle_data(self, _, data: bytearray):

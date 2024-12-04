@@ -1,13 +1,12 @@
-import certifi
-# -- mode: python ; coding: utf-8 --
+# -*- mode: python ; coding: utf-8 -*-
 
 
 a = Analysis(
     ['app.py'],
     pathex=[],
     binaries=[],
-    datas=[('C:\\Users\\franc\\AppData\\Local\\pypoetry\\Cache\\virtualenvs\\berry-integration-O9_8wKB9-py3.11\\Lib\\site-packages\\certifi\\cacert.pem', 'certifi'),  (certifi.where(), 'pusher/')],
-    hiddenimports=['asyncio', 'bleak', 'pusher', 'pysher', 'certifi', 'src.data_parser', 'src.bluetooth_manager'],
+    datas=[('C:\\Users\\abrun\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\\LocalCache\\Local\\pypoetry\\Cache\\virtualenvs\\berry-integration-usJ2bGA9-py3.11\\Lib\\site-packages\\certifi\\cacert.pem', 'certifi')],
+    hiddenimports=['asyncio', 'bleak', 'pysher', 'certifi', 'src.data_parser', 'src.bluetooth_manager', 'aiohttp', 'aiohttp.client'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

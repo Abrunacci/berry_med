@@ -1,19 +1,21 @@
 # BerryMed Vitals Monitor
 
-A Python application that connects to BerryMed devices via Bluetooth LE and streams vital signs data through Pusher.
+A Python application that connects to BerryMed devices via Bluetooth LE and streams vital signs data via HTTP. The application listens for start/stop commands through a Pusher public channel.
+
+> **Note**: This application is currently only compatible with Windows 10 or higher.
 
 ## Prerequisites
 
+- Windows 10 or higher (required for Bluetooth LE support)
 - Python 3.11 or higher
 - Poetry (Python package manager)
-- Windows 10 or higher (for Bluetooth LE support)
 - BerryMed compatible device
 
-## Installation (DEVELOPMENT ONLY)
+## Installation
 
 1. Clone the repository:
 ```bash
-git clone git@github.com:Abrunacci/berry_med.git
+git clone https://github.com/Abrunacci/berry_med.git
 cd berry_med
 ```
 
@@ -27,12 +29,25 @@ curl -sSL https://install.python-poetry.org | python3
 poetry install
 ``` 
 
-4. Configure your Pusher credentials:
+4. Configure your credentials:
 ```bash
 poetry run python configure.py
 ```
 
-5. Running the Application:
+You will need to provide:
+- Pusher Key (for receiving commands)
+- Pusher Cluster
+- Totem ID
+- API URL (for sending vital signs)
+- API Username
+- API Password
+- Public Channel Name
+- Start/Stop Event Names
+
+## Running the Application
+
+### Development Mode
+
 ```bash
 poetry run python app.py
 ```
@@ -41,16 +56,44 @@ poetry run python app.py
 
 1. First, build the configuration tool:
 ```bash
-poetry run pyinstaller --noconfirm --onefile --clean --name berry-configure ^
-    --hidden-import=json ^
-    --hidden-import=getpass ^
-    --hidden-import=pathlib ^
-    configure.py
+poetry run pyinstaller --noconfirm --onefile --clean --name berry-configure configure.py
 ```
 
-2. Then build the monitor application:
+2. Then build the monitor application. First, get the certifi path:
 ```bash
-poetry run pyinstaller berry-monitor.spec
+poetry run python -c "import certifi; print(certifi.where())"
+```
+
+3. Use the path from above in the following command (replace PATH_TO_CERTIFI with the output from step 2):
+
+For PowerShell:
+```powershell
+poetry run pyinstaller --noconfirm --onefile --clean --name berry-monitor `
+    --hidden-import asyncio `
+    --hidden-import bleak `
+    --hidden-import pysher `
+    --hidden-import certifi `
+    --hidden-import src.data_parser `
+    --hidden-import src.bluetooth_manager `
+    --hidden-import aiohttp `
+    --hidden-import aiohttp.client `
+    --add-data "PATH_TO_CERTIFI;certifi" `
+    app.py
+```
+
+For Command Prompt (CMD):
+```cmd
+poetry run pyinstaller --noconfirm --onefile --clean --name berry-monitor ^
+    --hidden-import asyncio ^
+    --hidden-import bleak ^
+    --hidden-import pysher ^
+    --hidden-import certifi ^
+    --hidden-import src.data_parser ^
+    --hidden-import src.bluetooth_manager ^
+    --hidden-import aiohttp ^
+    --hidden-import aiohttp.client ^
+    --add-data "PATH_TO_CERTIFI;certifi" ^
+    app.py
 ```
 
 The executables will be created in the `dist` directory:
@@ -59,8 +102,14 @@ The executables will be created in the `dist` directory:
 
 ## Usage
 
-1. Run `berry-configure.exe` first to set up your Pusher credentials
+1. Run `berry-configure.exe` first to set up your credentials
 2. Run `berry-monitor.exe` to start monitoring your BerryMed device
+
+## Communication Flow
+
+1. The application listens for start/stop events on a public Pusher channel
+2. When monitoring is active, vital signs data is sent via HTTP POST to the configured API URL
+3. Basic authentication is used for API requests using the configured username and password
 
 ## Troubleshooting
 
@@ -75,25 +124,10 @@ The executables will be created in the `dist` directory:
 ## Dependencies
 
 - bleak: Bluetooth LE communication
-- pusher: Real-time data streaming
-- python-dotenv: Environment variable management
+- pysher: Pusher client for event listening
+- aiohttp: Async HTTP client
+- certifi: SSL certificate verification
 - PyInstaller: Executable creation
-
-## Building from Source
-
-To modify and rebuild the application:
-
-1. Make your changes to the source code
-2. Update version in `pyproject.toml` if needed
-3. Build new executable:
-```bash
-# Clean previous builds
-rm -rf build dist
-# Create new executable
-poetry run pyinstaller --onefile --name berry-monitor app.py
-```
-
-The new executable will be in `dist/berry-monitor.exe`
 
 ## License
 
@@ -101,4 +135,4 @@ GNU GPLv3.0
 
 ## Support
 
-For issues and feature requests, please [open an issue](https://github.com/yourusername/berry-integration/issues) on GitHub.
+For issues and feature requests, please [open an issue](https://github.com/Abrunacci/berry_med/issues) on GitHub.
