@@ -19,6 +19,7 @@ class VitalsMonitor:
     def __init__(self):
         self.data_parser = BMDataParser()
         self.monitor = BMPatientMonitor(self.data_parser, self.status_callback)
+        self.main_loop = None  # Almacenar el loop principal
 
         # Register callbacks
         self.data_parser.register_callback(
@@ -129,10 +130,14 @@ class VitalsMonitor:
         """Handle the start blood pressure measurement event"""
         try:
             print("[DEBUG] Starting blood pressure measurement")
-            asyncio.run_coroutine_threadsafe(
-                self.command_queue.put("start_nibp"), 
-                asyncio.get_event_loop()
-            )
+            if self.main_loop:
+                future = asyncio.run_coroutine_threadsafe(
+                    self.monitor.start_nibp(),
+                    self.main_loop
+                )
+                future.result()  # Espera el resultado
+            else:
+                print("[ERROR] Main event loop not initialized")
         except Exception as e:
             print(f"[ERROR] Error starting blood pressure measurement: {e}")
 
@@ -214,6 +219,7 @@ class VitalsMonitor:
         return not (all_vitals_empty and spo2_empty and ecg_empty and resp_empty)
 
     async def run(self):
+        self.main_loop = asyncio.get_running_loop()  # Guardar referencia al loop principal
         while True:
             try:
                 print("\n[BERRY] Attempting to connect to Berry device...")
