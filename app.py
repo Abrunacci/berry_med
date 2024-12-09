@@ -123,11 +123,11 @@ class VitalsMonitor:
         self.is_sending_data = False
         print("[DEBUG] Stopped data transmission")
 
-    async def handle_blood_pressure_event(self, event_data):
+    def handle_blood_pressure_event(self, event_data):
         """Handle the start blood pressure measurement event"""
         try:
             print("[DEBUG] Starting blood pressure measurement")
-            await self.monitor.start_nibp()
+            asyncio.create_task(self.monitor.start_nibp())
         except Exception as e:
             print(f"[ERROR] Error starting blood pressure measurement: {e}")
 
