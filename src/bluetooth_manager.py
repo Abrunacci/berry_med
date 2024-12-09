@@ -87,3 +87,10 @@ class BMPatientMonitor:
                 self.status_callback("Device disconnected, attempting to reconnect...")
                 self.connected = False
                 await self.connect()
+
+    def send_nibp_command(self):
+        """Send NIBP command synchronously"""
+        if self.client and self.client.is_connected:
+            command = bytearray([0x55, 0xAA, 0x04, 0x02, 0x01, 0xF8])
+            return command
+        return None

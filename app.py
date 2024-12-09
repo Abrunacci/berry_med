@@ -127,7 +127,9 @@ class VitalsMonitor:
         """Handle the start blood pressure measurement event"""
         try:
             print("[DEBUG] Starting blood pressure measurement")
-            asyncio.create_task(self.monitor.start_nibp())
+            command = self.monitor.send_nibp_command()
+            if command:
+                self.monitor.client.write_gatt_char(self.monitor.CHAR_SEND_UUID, command)
         except Exception as e:
             print(f"[ERROR] Error starting blood pressure measurement: {e}")
 
