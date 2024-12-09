@@ -69,6 +69,8 @@ class VitalsMonitor:
         )
         self.pusher_subscriber.connect()
 
+        self.command_queue = asyncio.Queue()
+
     def status_callback(self, message: str):
         """Callback for device status updates"""
         print(f"[BERRY STATUS] {message}")
@@ -127,9 +129,10 @@ class VitalsMonitor:
         """Handle the start blood pressure measurement event"""
         try:
             print("[DEBUG] Starting blood pressure measurement")
-            command = self.monitor.send_nibp_command()
-            if command:
-                self.monitor.client.write_gatt_char(self.monitor.CHAR_SEND_UUID, command)
+            asyncio.run_coroutine_threadsafe(
+                self.command_queue.put("start_nibp"), 
+                asyncio.get_event_loop()
+            )
         except Exception as e:
             print(f"[ERROR] Error starting blood pressure measurement: {e}")
 
@@ -221,12 +224,20 @@ class VitalsMonitor:
                     continue
 
                 asyncio.create_task(self.send_data())
+                asyncio.create_task(self.process_commands())
                 print("[BERRY] Connection successful, starting data monitoring...")
                 while True:
                     await asyncio.sleep(0.1)
             except Exception as e:
                 print(f"[ERROR] Berry connection error: {str(e)}")
                 await asyncio.sleep(5)
+
+    async def process_commands(self):
+        while True:
+            command = await self.command_queue.get()
+            if command == "start_nibp":
+                await self.monitor.start_nibp()
+            await asyncio.sleep(0.1)
 
 
 async def main():
