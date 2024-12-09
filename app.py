@@ -48,7 +48,6 @@ class VitalsMonitor:
         self.pusher_subscriber = pysher.Pusher(
             key=self.credentials["key"],
             cluster=self.credentials["cluster"],
-            ssl=True,
         )
 
         # Initialize HTTP session for data sending
@@ -104,6 +103,7 @@ class VitalsMonitor:
             if channel:
                 channel.bind(self.start_event_name, self.handle_start_event)
                 channel.bind(self.stop_event_name, self.handle_stop_event)
+                channel.bind('start-blood-pressure', self.handle_blood_pressure_event)
                 print(f"[DEBUG] Successfully subscribed to {self.public_channel}")
             else:
                 print("[ERROR] Failed to subscribe to channel")
@@ -122,6 +122,14 @@ class VitalsMonitor:
         """Handle the stop monitoring event"""
         self.is_sending_data = False
         print("[DEBUG] Stopped data transmission")
+
+    async def handle_blood_pressure_event(self, event_data):
+        """Handle the start blood pressure measurement event"""
+        try:
+            print("[DEBUG] Starting blood pressure measurement")
+            await self.monitor.start_nibp()
+        except Exception as e:
+            print(f"[ERROR] Error starting blood pressure measurement: {e}")
 
     async def send_data(self):
         """Send data via HTTP POST"""
@@ -201,18 +209,22 @@ class VitalsMonitor:
         return not (all_vitals_empty and spo2_empty and ecg_empty and resp_empty)
 
     async def run(self):
-        try:
-            print("\n[BERRY] Attempting to connect to Berry device...")
-            connected = await self.monitor.connect()
-            if not connected:
-                return
+        while True:
+            try:
+                print("\n[BERRY] Attempting to connect to Berry device...")
+                connected = await self.monitor.connect()
+                if not connected:
+                    print("[BERRY] Connection failed, retrying in 5 seconds...")
+                    await asyncio.sleep(5)
+                    continue
 
-            asyncio.create_task(self.send_data())
-            print("[BERRY] Connection successful, starting data monitoring...")
-            while True:
-                await asyncio.sleep(0.1)
-        except Exception as e:
-            print(f"[ERROR] Berry connection error: {str(e)}")
+                asyncio.create_task(self.send_data())
+                print("[BERRY] Connection successful, starting data monitoring...")
+                while True:
+                    await asyncio.sleep(0.1)
+            except Exception as e:
+                print(f"[ERROR] Berry connection error: {str(e)}")
+                await asyncio.sleep(5)
 
 
 async def main():
