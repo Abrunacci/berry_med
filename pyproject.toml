@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "berry-integration"
+version = "0.1.0"
+description = ""
+authors = ["Alejandro Brunacci <Alejandro.brunacci@parserx.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+bleak = "^0.22.3"
+pyinstaller = "^6.11.1"
+pusher = "^3.3.2"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
