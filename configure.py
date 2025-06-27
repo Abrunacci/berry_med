@@ -25,6 +25,10 @@ def setup_credentials():
             "Stop Event Name (default 'stop-monitoring'): "
         ).strip()
         or "stop-monitoring",
+        "DEVICE_CONNECTION": input("Device connection [bt/usb] (default 'bt'): ").strip().lower() or "bt",
+        "DEVICE_PORT": input(
+            "USB port (e.g., COM3 or /dev/ttyACM0) (default 'COM3'): "
+        ).strip() or "COM3",
     }
 
     try:

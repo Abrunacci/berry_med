@@ -11,6 +11,7 @@ import pysher
 from config import get_config
 from src.bluetooth_manager import BMPatientMonitor
 from src.data_parser import BMDataParser
+from src.serial_manager import PM6750USBReader
 
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
@@ -18,7 +19,19 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 class VitalsMonitor:
     def __init__(self):
         self.data_parser = BMDataParser()
-        self.monitor = BMPatientMonitor(self.data_parser, self.status_callback)
+        cfg = get_config()
+        print(cfg)
+
+        if cfg.get("device_connection", "bt") == "usb":
+            self.monitor = PM6750USBReader(
+                parser=self.data_parser,
+                port  =cfg.get("device_port", "COM3"),
+            )
+        else:
+            self.monitor = BMPatientMonitor(self.data_parser, self.status_callback)
+
+        
+        # self.monitor = BMPatientMonitor(self.data_parser, self.status_callback)
         self.main_loop = None  # Almacenar el loop principal
 
         # Register callbacks
@@ -78,24 +91,31 @@ class VitalsMonitor:
 
     # Handler methods
     def handle_ecg_wave(self, value: int):
+        
         pass
 
     def handle_spo2_wave(self, value: int):
+        
         pass
 
     def handle_resp_wave(self, value: int):
+        
         pass
 
     def handle_ecg(self, states: int, heart_rate: int, resp_rate: int):
+        
         pass
 
     def handle_spo2(self, states: int, spo2: int, pulse_rate: int):
+        
         pass
 
     def handle_temperature(self, states: int, temp: float):
+        
         pass
 
     def handle_nibp(self, states: int, cuff: int, sys: int, mean: int, dia: int):
+        
         pass
 
     def connect_handler(self, data):
@@ -162,6 +182,7 @@ class VitalsMonitor:
                     max_retries = 3
                     for attempt in range(max_retries):
                         try:
+                            print(f"[DEBUG] Sending data: {data}")
                             async with session.post(
                                 self.api_url,
                                 json=payload,
@@ -171,6 +192,7 @@ class VitalsMonitor:
                                 },
                             ) as response:
                                 if response.status == 200:
+                                    
                                     print("[DATA] Vital signs sent successfully")
                                     break
                                 else:
