@@ -11,6 +11,7 @@ import pysher
 from config import get_config
 from src.bluetooth_manager import BMPatientMonitor
 from src.data_parser import BMDataParser
+from src.serial_manager import PM6750USBReader
 
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
@@ -18,7 +19,19 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 class VitalsMonitor:
     def __init__(self):
         self.data_parser = BMDataParser()
-        self.monitor = BMPatientMonitor(self.data_parser, self.status_callback)
+        cfg = get_config()
+        print(cfg)
+
+        if cfg.get("device_connection", "bt") == "usb":
+            self.monitor = PM6750USBReader(
+                parser=self.data_parser,
+                port  =cfg.get("device_port", "COM3"),
+            )
+        else:
+            self.monitor = BMPatientMonitor(self.data_parser, self.status_callback)
+
+        
+        # self.monitor = BMPatientMonitor(self.data_parser, self.status_callback)
         self.main_loop = None  # Almacenar el loop principal
 
         # Register callbacks

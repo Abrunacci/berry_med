@@ -39,6 +39,8 @@ def get_config():
             "public_channel": credentials.get("PUBLIC_CHANNEL"),
             "start_event_name": credentials.get("START_EVENT_NAME"),
             "stop_event_name": credentials.get("STOP_EVENT_NAME"),
+            "device_connection": credentials.get("DEVICE_CONNECTION", "bt"),
+            "device_port": credentials.get("DEVICE_PORT", "COM3"),
         }
 
     except Exception as e:
