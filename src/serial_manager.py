@@ -1,119 +1,114 @@
-import serial, threading, asyncio
-from typing import Optional, Callable
+import serial, threading, time, asyncio
 
 HEADER = b"\x55\xAA"
 
+def _cs(n, payload):                 # checksum
+    return (~(n + sum(payload)) & 0xFF) & 0xFF
 
-def _checksum(n: int, data: bytes) -> int:
-    return (~(n + sum(data)) & 0xFF) & 0xFF
-
-
-def _cmd(a1: int, a2: int) -> bytes:
-    """Construye un paquete 55 AA ‹len› ‹a1 a2› ‹checksum›."""
+def _cmd(a1, a2):
     payload = bytes([a1, a2])
     n = len(payload) + 2
-    return HEADER + bytes([n]) + payload + bytes([_checksum(n, payload)])
-
+    return HEADER + bytes([n]) + payload + bytes([_cs(n, payload)])
 
 class PM6750USBReader:
     """
-    Lector USB con **la misma interfaz** que BMPatientMonitor:
+    Lector PM-6750 vía USB.
 
-        await connect()          → True/False
-        await start_nibp()       → inicia medición de presión
+    – async connect()   -> bool
+    – start_monitoring() / stop_monitoring()
+    – async start_nibp()               (medición única, evita reinflado)
 
-    Todos los frames recibidos se pasan sin procesar al BMDataParser,
-    así los callbacks existentes siguen funcionando (ECG, SpO₂, TEMP,
-    RESP, NIBP, etc.).
+    Mantiene la misma interfaz que el Bluetooth para que la app
+    no tenga que distinguir el tipo de conexión.
     """
-
-    def __init__(
-        self,
-        parser,
-        port: str = "COM3",
-        baud: int = 115_200,
-        status_callback: Optional[Callable[[str], None]] = None,
-    ):
+    def __init__(self, parser, port="COM4", baud=115200):
         self.parser = parser
-        self.port = port
-        self.baud = baud
-        self.status_callback = status_callback or (lambda *_: None)
+        self.port   = port
+        self.baud   = baud
+        self.ser    = None
+        self._run   = False
+        self._t     = None              # hilo de lectura
+        self.nibp_running = False       # ← flag
 
-        self._ser: Optional[serial.Serial] = None
-        self._run = False
-        self._thread: Optional[threading.Thread] = None
-        self._lock = threading.Lock()
+        # Resetea el flag cuando el módulo devuelve resultado
+        self.parser.register_callback(
+            "on_nibp_params_received", self._nibp_done
+        )
 
-    # ----------------------------------------------------------------- PUBLIC
+    # ---------- API pública -----------------------------------------------
     async def connect(self) -> bool:
-        """Abre el puerto y arranca el hilo de lectura (API async)."""
-        try:
-            self.status_callback(f"Opening {self.port} @ {self.baud}…")
-            self._ser = serial.Serial(self.port, self.baud, timeout=0.3)
-        except (serial.SerialException, OSError) as exc:
-            self.status_callback(f"Failed to open {self.port}: {exc}")
-            return False
+        """Abre el puerto y arranca la lectura (async para la app)."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._connect_sync)
 
-        self._enable_all_channels()           # envia comandos 55 AA …
+    def start_monitoring(self):
+        if not (self.ser and self.ser.is_open):
+            print("[USB] Puerto no abierto"); return
+        # Habilitar streams
+        for a1, a2 in (
+            (0x01,1), (0x02,1), (0x03,1), (0x04,1),   # ECG / NIBP / SpO₂ / TEMP
+            (0xFB,1), (0xFE,1), (0xFF,1),             # ECG / SpO₂ / RESP waves
+        ):
+            self.ser.write(_cmd(a1, a2))
 
         self._run = True
-        self._thread = threading.Thread(target=self._read_loop, daemon=True)
-        self._thread.start()
-        self.status_callback("USB device connected and reader running")
-        return True
+        self._t   = threading.Thread(target=self._loop, daemon=True)
+        self._t.start()
+        print("[USB] Lectura iniciada")
+
+    def stop_monitoring(self):
+        self._run = False
+        if self._t:
+            self._t.join(timeout=1)
+        if self.ser and self.ser.is_open:
+            self.ser.close()
+        self.nibp_running = False
+        print("[USB] Lectura detenida")
 
     async def start_nibp(self):
-        """Comando 55 AA 04 02 01 F8 → comenzar medición NIBP."""
-        with self._lock:
-            if self._ser and self._ser.is_open:
-                self._ser.write(_cmd(0x02, 0x01))
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._start_nibp_sync)
 
-    def disconnect(self):
-        """Llamable desde fuera si se requiere apagar el hilo manualmente."""
-        self._run = False
-
-    # -------------------------------------------------------------- INTERNAL
-    def _enable_all_channels(self):
-        if not (self._ser and self._ser.is_open):
-            return
-        # Parámetros
-        self._ser.write(_cmd(0x01, 0x01))   # ECG param
-        self._ser.write(_cmd(0x02, 0x01))   # NIBP param
-        self._ser.write(_cmd(0x03, 0x01))   # SpO2 param
-        self._ser.write(_cmd(0x04, 0x01))   # TEMP param
-        # Waveforms
-        self._ser.write(_cmd(0xFB, 0x01))   # ECG waveform
-        self._ser.write(_cmd(0xFE, 0x01))   # SpO2 waveform
-        self._ser.write(_cmd(0xFF, 0x01))   # RESP waveform
-
-    def _read_loop(self):
-        buf = bytearray()
+    # ---------- Internos ---------------------------------------------------
+    def _connect_sync(self) -> bool:
         try:
-            while self._run and self._ser and self._ser.is_open:
-                data = self._ser.read(256)
-                if not data:
-                    continue
-                buf.extend(data)
-                while len(buf) >= 3:
-                    if buf[:2] != HEADER:
-                        buf.pop(0)
-                        continue
-                    n = buf[2]
-                    if len(buf) < n + 3:
-                        break
-                    frame = bytes(buf[: n + 3])
-                    buf = buf[n + 3 :]
-                    self.parser.add_data(frame)  # ← delega al BMDataParser
-        except Exception as exc:
-            self.status_callback(f"USB reader stopped: {exc}")
-        finally:
-            self._cleanup()
+            self.ser = serial.Serial(self.port, self.baud, timeout=0.3)
+            print(f"[USB] Puerto {self.port} abierto")
+            self.start_monitoring()
+            return True
+        except Exception as e:
+            print(f"[USB] No se pudo abrir {self.port}: {e}")
+            return False
 
-    def _cleanup(self):
-        self._run = False
-        if self._ser and self._ser.is_open:
-            try:
-                self._ser.close()
-            except Exception:
-                pass
-        self.status_callback("USB device disconnected")
+    def _start_nibp_sync(self):
+        if self.ser and self.ser.is_open and not self.nibp_running:
+            print("[USB] → start NIBP")
+            self.ser.write(_cmd(0x02, 0x01))
+            self.nibp_running = True     # ← bloqueo hasta recibir resultado
+
+    def _nibp_done(self, status, cuff, sys, mean, dia):
+        """
+        Callback interno: libera nibp_running cuando la medición
+        terminó, fue detenida, fuera de rango o falló.
+        Bits 5..2 de 'status' indican el resultado.
+        """
+        result = (status >> 2) & 0x0F
+        if result in (0x0, 0x2, 0x4, 0x5):   # finished / stopped / error / timeout
+            self.nibp_running = False
+
+    def _loop(self):
+        buf = bytearray()
+        while self._run and self.ser and self.ser.is_open:
+            data = self.ser.read(256)
+            if not data:
+                continue
+            buf.extend(data)
+            while len(buf) >= 3:
+                if buf[:2] != HEADER:
+                    buf.pop(0); continue
+                n = buf[2]
+                if len(buf) < n + 3:
+                    break
+                frame = bytes(buf[: n + 3])
+                buf   = buf[n + 3:]
+                self.parser.add_data(frame)

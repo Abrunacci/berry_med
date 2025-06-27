@@ -91,24 +91,31 @@ class VitalsMonitor:
 
     # Handler methods
     def handle_ecg_wave(self, value: int):
+        
         pass
 
     def handle_spo2_wave(self, value: int):
+        
         pass
 
     def handle_resp_wave(self, value: int):
+        
         pass
 
     def handle_ecg(self, states: int, heart_rate: int, resp_rate: int):
+        
         pass
 
     def handle_spo2(self, states: int, spo2: int, pulse_rate: int):
+        
         pass
 
     def handle_temperature(self, states: int, temp: float):
+        
         pass
 
     def handle_nibp(self, states: int, cuff: int, sys: int, mean: int, dia: int):
+        
         pass
 
     def connect_handler(self, data):
@@ -175,6 +182,7 @@ class VitalsMonitor:
                     max_retries = 3
                     for attempt in range(max_retries):
                         try:
+                            print(f"[DEBUG] Sending data: {data}")
                             async with session.post(
                                 self.api_url,
                                 json=payload,
@@ -184,6 +192,7 @@ class VitalsMonitor:
                                 },
                             ) as response:
                                 if response.status == 200:
+                                    
                                     print("[DATA] Vital signs sent successfully")
                                     break
                                 else:
