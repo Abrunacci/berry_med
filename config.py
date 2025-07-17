@@ -41,6 +41,7 @@ def get_config():
             "stop_event_name": credentials.get("STOP_EVENT_NAME"),
             "device_connection": credentials.get("DEVICE_CONNECTION", "bt"),
             "device_port": credentials.get("DEVICE_PORT", "COM3"),
+            "ssl_cert_file": credentials.get("SSL_CERT_FILE_PATH")
         }
 
     except Exception as e:
