@@ -5,7 +5,7 @@ a = Analysis(
     ['app.py'],
     pathex=[],
     binaries=[],
-    datas=[('C:\\Users\\abrun\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\\LocalCache\\Local\\pypoetry\\Cache\\virtualenvs\\berry-integration-cq24RdPH-py3.11\\Lib\\site-packages\\certifi\\cacert.pem', 'certifi')],
+    datas=[],
     hiddenimports=['asyncio', 'bleak', 'pysher', 'certifi', 'src.data_parser', 'src.bluetooth_manager', 'aiohttp', 'aiohttp.client'],
     hookspath=[],
     hooksconfig={},

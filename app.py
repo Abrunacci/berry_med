@@ -13,7 +13,7 @@ from src.bluetooth_manager import BMPatientMonitor
 from src.data_parser import BMDataParser
 from src.serial_manager import PM6750USBReader
 
-os.environ["SSL_CERT_FILE"] = certifi.where()
+os.environ["SSL_CERT_FILE"] = get_config["ssl_cert_file"]
 
 
 class VitalsMonitor:

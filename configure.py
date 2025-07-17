@@ -29,6 +29,7 @@ def setup_credentials():
         "DEVICE_PORT": input(
             "USB port (e.g., COM3 or /dev/ttyACM0) (default 'COM3'): "
         ).strip() or "COM3",
+        "SSL_CERT_FILE_PATH": input("Path to certificate file (e.g.: C:\\user\\cert.pem): ").strip()
     }
 
     try:
