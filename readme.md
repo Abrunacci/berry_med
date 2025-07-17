@@ -64,6 +64,47 @@ A simple tool for monitoring vital signs from BerryMed devices over Bluetooth or
 
 ---
 
+### 📄 About the SSL Certificate
+
+The application requires a valid `.pem` certificate file for HTTPS requests.  
+This can be:
+
+- A copy of the certificate bundle used by Python (e.g., from `certifi`)
+- A custom CA bundle provided by your IT or security team
+- A manually created `.pem` file using OpenSSL
+
+---
+
+#### 🔧 Example 1 – Using the certifi bundle
+
+You can download the same trusted certificate file used by Python:
+
+- [Download from certifi GitHub](https://github.com/certifi/python-certifi/blob/main/certifi/cacert.pem)
+- [Direct Mozilla CA Bundle (raw .pem)](https://curl.se/ca/cacert.pem)
+
+---
+
+#### 🔧 Example 2 – Export your own from a domain (advanced)
+
+Extract the SSL certificate from a domain using OpenSSL.
+
+**On Bash (Linux/macOS/WSL):**
+
+```bash
+openssl s_client -showcerts -connect example.com:443 </dev/null \
+  2>/dev/null | openssl x509 -outform PEM > cacert.pem
+```
+
+**On PowerShell (Windows):**
+
+```powershell
+openssl s_client -showcerts -connect example.com:443 | `
+    openssl x509 -outform PEM | `
+    Out-File -Encoding ascii -FilePath .\cacert.pem
+```
+
+> ⚠️ Make sure the resulting `cacert.pem` includes the correct CA chain required to validate the API endpoint.
+
 
 ## 📄 License
 
