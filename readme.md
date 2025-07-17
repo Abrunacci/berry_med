@@ -20,7 +20,50 @@ A simple tool for monitoring vital signs from BerryMed devices over Bluetooth or
    ```
    berry-configure.exe
    ```
-   This will prompt you to enter your credentials, device settings, and path to the SSL certificate (`cacert.pem`).
+   
+This tool will prompt you to enter the required settings, which will be saved locally in a file (`credentials.json`) and used automatically by the monitoring app.
+
+#### Required fields:
+
+- **Pusher Key / Cluster**  
+  Provided by the platform that controls event broadcasting.  
+  ⚠️ Make sure the Pusher **channel is PUBLIC**, otherwise it will not work.
+
+- **Totem ID**  
+  A unique identifier for the monitoring device or station.
+
+- **API URL / Username / Password**  
+  This is the destination where your device will POST vital signs data.  
+  Credentials must be valid and have write access.
+
+- **Public Channel Name**  
+  Name of the Pusher channel you will be listening to.  
+  Must match the backend configuration exactly.
+
+- **Start / Stop Event Names**  
+  Event identifiers (e.g., `start-monitoring`, `stop-monitoring`)  
+  These control when the data stream begins or ends.
+
+- **Device Connection Type**  
+  `bt` for Bluetooth or `usb` for USB serial connection.
+
+- **USB Port (only if using USB mode)**  
+  Example: `COM3` (Windows) or `/dev/ttyUSB0` (Linux)
+
+- **Path to SSL Certificate (.pem)**  
+  The certificate used to validate secure HTTPS requests.  
+  This must be a valid `.pem` file. You can:
+  - Use one provided by your company
+  - Download a public CA bundle (see below)
+  - Or extract one manually using OpenSSL
+
+
+
+### Need help getting a certificate?
+
+See [About the SSL Certificate](#about-the-ssl-certificate) for instructions.
+
+---
 
 2. Start monitoring:
    ```
@@ -64,46 +107,6 @@ A simple tool for monitoring vital signs from BerryMed devices over Bluetooth or
 
 ---
 
-### 📄 About the SSL Certificate
-
-The application requires a valid `.pem` certificate file for HTTPS requests.  
-This can be:
-
-- A copy of the certificate bundle used by Python (e.g., from `certifi`)
-- A custom CA bundle provided by your IT or security team
-- A manually created `.pem` file using OpenSSL
-
----
-
-#### 🔧 Example 1 – Using the certifi bundle
-
-You can download the same trusted certificate file used by Python:
-
-- [Download from certifi GitHub](https://github.com/certifi/python-certifi/blob/main/certifi/cacert.pem)
-- [Direct Mozilla CA Bundle (raw .pem)](https://curl.se/ca/cacert.pem)
-
----
-
-#### 🔧 Example 2 – Export your own from a domain (advanced)
-
-Extract the SSL certificate from a domain using OpenSSL.
-
-**On Bash (Linux/macOS/WSL):**
-
-```bash
-openssl s_client -showcerts -connect example.com:443 </dev/null \
-  2>/dev/null | openssl x509 -outform PEM > cacert.pem
-```
-
-**On PowerShell (Windows):**
-
-```powershell
-openssl s_client -showcerts -connect example.com:443 | `
-    openssl x509 -outform PEM | `
-    Out-File -Encoding ascii -FilePath .\cacert.pem
-```
-
-> ⚠️ Make sure the resulting `cacert.pem` includes the correct CA chain required to validate the API endpoint.
 
 
 ## 📄 License
