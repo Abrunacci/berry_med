@@ -38,11 +38,22 @@ class BMDataParser:
         self.last_update_time = 0
 
     # ---------- API ---------------------------------------------------------
+    # def register_callback(self, name: str, callback: Callable) -> None:
+    #     for key, (callback_name, _) in self.callbacks.items():
+    #         if callback_name == name:
+    #             self.callbacks[key] = (callback_name, callback)
+    #             break
     def register_callback(self, name: str, callback: Callable) -> None:
+        found = False
         for key, (callback_name, _) in self.callbacks.items():
             if callback_name == name:
                 self.callbacks[key] = (callback_name, callback)
+                found = True
+
                 break
+        if not found:
+            print("[DBG][WARN] callback name not found:", name)
+
 
     def add_data(self, data: bytearray) -> None:
         self.raw_buffer.extend(data)
@@ -161,10 +172,32 @@ class BMDataParser:
                 dia_val = self._format_value(dia)
                 if sys != 0 or dia != 0:
                     self.data["vitalSigns"]["nibp"] = f"{sys_val}/{dia_val}"
-                callback(package[4], package[5] * 2, sys, package[7], dia)
+                if package[4] == 0:
+                    callback(package[4], package[5] * 2, sys, package[7], dia)
+                else: # retro compatibilidad con otras versiones
+                    callback(package[4], package[5] * 2, sys, package[7], dia)
 
             elif callback_name in ["on_ecg_peak_received", "on_spo2_peak_received"]:
                 callback()
 
         except Exception as e:
             print(f"Error in callback {callback_name}: {e}")
+
+    def reset_data(self):
+        # limpiar buffer crudo y timestamp
+        self.raw_buffer.clear()
+        self.last_update_time = 0
+
+        # restaurar valores por defecto
+        self.data = {
+            "spo2": [],
+            "ecg": [],
+            "resp": [],
+            "vitalSigns": {
+                "heartRate": "- -",
+                "nibp": "- - /- -",
+                "spo2Pulse": "- - /- -",
+                "temperature": "- -",
+                "respRate": "- -",
+            },
+        }

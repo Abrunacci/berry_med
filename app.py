@@ -25,11 +25,10 @@ class VitalsMonitor:
         if cfg.get("device_connection", "bt") == "usb":
             self.monitor = PM6750USBReader(
                 parser=self.data_parser,
-                port  =cfg.get("device_port", "COM3"),
+                port=cfg.get("device_port", "COM3"),
             )
         else:
             self.monitor = BMPatientMonitor(self.data_parser, self.status_callback)
-
         
         # self.monitor = BMPatientMonitor(self.data_parser, self.status_callback)
         self.main_loop = None  # Almacenar el loop principal
@@ -49,7 +48,8 @@ class VitalsMonitor:
         self.data_parser.register_callback(
             "on_temp_params_received", self.handle_temperature
         )
-        self.data_parser.register_callback("on_nibp_params_received", self.handle_nibp)
+        if not isinstance(self.monitor, PM6750USBReader):
+            self.data_parser.register_callback("on_nibp_params_received", self.handle_nibp)
 
         # Initialize credentials
         self.credentials = get_config()
@@ -144,6 +144,9 @@ class VitalsMonitor:
     def handle_stop_event(self, event_data):
         """Handle the stop monitoring event"""
         self.is_sending_data = False
+        if isinstance(self.monitor, PM6750USBReader):
+            self.monitor.reset_state()
+        self.monitor.parser.reset_data()
         print("[DEBUG] Stopped data transmission")
 
     def handle_blood_pressure_event(self, event_data):
