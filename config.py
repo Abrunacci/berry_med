@@ -28,6 +28,8 @@ def get_config():
         with open(config_file, "r") as f:
             credentials = json.load(f)
 
+        default_thermometer_port = "COM5" if sys.platform == "win32" else "/dev/ttyACM0"
+
         # Return all configurations from credentials file
         return {
             "key": credentials.get("PUSHER_KEY"),
@@ -41,7 +43,16 @@ def get_config():
             "stop_event_name": credentials.get("STOP_EVENT_NAME"),
             "device_connection": credentials.get("DEVICE_CONNECTION", "bt"),
             "device_port": credentials.get("DEVICE_PORT", "COM3"),
-            "ssl_cert_file": credentials.get("SSL_CERT_FILE_PATH")
+            "ssl_cert_file": credentials.get("SSL_CERT_FILE_PATH"),
+            "thermometer_enabled": str(
+                credentials.get("THERMOMETER_ENABLED", "false")
+            ).lower()
+            in {"1", "true", "yes", "on"},
+            "thermometer_port": credentials.get(
+                "THERMOMETER_PORT", default_thermometer_port
+            ),
+            "thermometer_baud": int(credentials.get("THERMOMETER_BAUD", 115200)),
+            "thermometer_reconnect_seconds": float(credentials.get("THERMOMETER_RECONNECT_SECONDS", 2.0))
         }
 
     except Exception as e:

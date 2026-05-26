@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import copy
 import os
 import sys
 import time
@@ -11,7 +12,7 @@ import pysher
 from config import get_config
 from src.bluetooth_manager import BMPatientMonitor
 from src.data_parser import BMDataParser
-from src.serial_manager import PM6750USBReader
+from src.thermometer_reader import ThermometerReader
 
 os.environ["SSL_CERT_FILE"] = get_config()["ssl_cert_file"]
 
@@ -21,8 +22,11 @@ class VitalsMonitor:
         self.data_parser = BMDataParser()
         cfg = get_config()
         print(cfg)
+        self.using_usb_monitor = cfg.get("device_connection", "bt") == "usb"
 
-        if cfg.get("device_connection", "bt") == "usb":
+        if self.using_usb_monitor:
+            from src.serial_manager import PM6750USBReader
+
             self.monitor = PM6750USBReader(
                 parser=self.data_parser,
                 port=cfg.get("device_port", "COM3"),
@@ -48,7 +52,7 @@ class VitalsMonitor:
         self.data_parser.register_callback(
             "on_temp_params_received", self.handle_temperature
         )
-        if not isinstance(self.monitor, PM6750USBReader):
+        if not self.using_usb_monitor:
             self.data_parser.register_callback("on_nibp_params_received", self.handle_nibp)
 
         # Initialize credentials
@@ -84,6 +88,19 @@ class VitalsMonitor:
         self.pusher_subscriber.connect()
 
         self.command_queue = asyncio.Queue()
+        self.thermometer_reader = None
+        self.thermometer_enabled = bool(
+            self.credentials.get("thermometer_enabled", False)
+        )
+
+        if self.thermometer_enabled:
+            self.thermometer_reader = ThermometerReader(
+                port=self.credentials.get("thermometer_port", "COM5"),
+                baud=int(self.credentials.get("thermometer_baud", 115200)),
+                reconnect_seconds=self.credentials.get("thermometer_reconnect_seconds", 2.0),
+                status_callback=self.status_callback
+            )
+            self.thermometer_reader.start()
 
     def status_callback(self, message: str):
         """Callback for device status updates"""
@@ -144,7 +161,7 @@ class VitalsMonitor:
     def handle_stop_event(self, event_data):
         """Handle the stop monitoring event"""
         self.is_sending_data = False
-        if isinstance(self.monitor, PM6750USBReader):
+        if self.using_usb_monitor:
             self.monitor.reset_state()
         self.monitor.parser.reset_data()
         print("[DEBUG] Stopped data transmission")
@@ -173,7 +190,8 @@ class VitalsMonitor:
                         await asyncio.sleep(1)
                         continue
 
-                    data = self.data_parser.get_current_data()
+                    data = copy.deepcopy(self.data_parser.get_current_data())
+                    self._apply_thermometer_temperature(data)
                     if not self._is_valid_data(data):
                         await asyncio.sleep(1)
                         continue
@@ -219,18 +237,58 @@ class VitalsMonitor:
 
                 await asyncio.sleep(1)
 
+    def _apply_thermometer_temperature(self, data):
+        if not self.thermometer_reader:
+            return
+
+        latest = self.thermometer_reader.get_latest()
+        if not latest:
+            return
+
+        value = self._parse_thermometer_value(latest)
+        if value is None:
+            return
+
+        celsius = self._to_celsius(value, latest.get("unit", "C"))
+        data.setdefault("vitalSigns", {})["temperature"] = self._format_temperature_c(
+            celsius
+        )
+
+    @staticmethod
+    def _parse_thermometer_value(latest):
+        try:
+            value = latest.get("value")
+            if value is None:
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _to_celsius(value: float, unit: str) -> float:
+        if str(unit).upper() == "F":
+            return (value - 32) * 5 / 9
+        return value
+
+    @staticmethod
+    def _format_temperature_c(value: float) -> str:
+        if value == 0:
+            return "-"
+        return str(round(value, 1))
+
     def _is_valid_data(self, data):
         """Check if data contains any valid measurements"""
         if not data or not isinstance(data, dict):
             return False
 
-        # Check vital signs
+        default_values = {"-", "- -", "- - /- -"}
+
         vital_signs = data.get("vitalSigns", {})
         if not vital_signs:
             return False
 
-        # Check if all vital signs are empty/default
-        default_values = {"-", "- -", "- - /- -"}
+        if str(vital_signs.get("temperature", "-")) not in default_values:
+            return True
         all_vitals_empty = all(
             str(value) in default_values for value in vital_signs.values()
         )
@@ -256,6 +314,8 @@ class VitalsMonitor:
 
                 asyncio.create_task(self.send_data())
                 asyncio.create_task(self.process_commands())
+                if self.thermometer_reader:
+                    self.thermometer_reader.start()
                 print("[BERRY] Connection successful, starting data monitoring...")
                 while True:
                     await asyncio.sleep(0.1)

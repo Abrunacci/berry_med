@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "BerryMed Python integration for windows"
 authors = ["Alejandro Brunacci <ABrunacci87@gmail.com>"]
 license = "GNU GPLv3.0"
-readme = "README.md"
+package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
@@ -13,6 +13,7 @@ pyinstaller = "^6.11.1"
 pysher = "^1.0.8"
 certifi = "^2024.8.30"
 aiohttp = "^3.11.9"
+pyserial = "^3.5"
 
 
 [build-system]

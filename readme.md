@@ -21,7 +21,7 @@ A simple tool for monitoring vital signs from BerryMed devices over Bluetooth or
    berry-configure.exe
    ```
    
-This tool will prompt you to enter the required settings, which will be saved locally in a file (`credentials.json`) and used automatically by the monitoring app.
+This tool will prompt you to enter the required settings, which are saved to `%APPDATA%\BerryMed Monitor\credentials.json` on Windows and used automatically by the monitoring app.
 
 #### Required fields:
 
@@ -48,7 +48,13 @@ This tool will prompt you to enter the required settings, which will be saved lo
   `bt` for Bluetooth or `usb` for USB serial connection.
 
 - **USB Port (only if using USB mode)**  
-  Example: `COM3` (Windows) or `/dev/ttyUSB0` (Linux)
+  Example: `COM3` (Windows). This is the Berry monitor port.
+
+- **Thermometer (optional USB IR)**  
+  - `THERMOMETER_ENABLED`: `true` or `false`  
+  - `THERMOMETER_PORT`: separate COM port (e.g. `COM5`)  
+  - `THERMOMETER_BAUD`: usually `115200`  
+  Temperature is sent in `vitalSigns.temperature` (Celsius). Thermometer data takes priority over Berry; if disabled or unavailable, Berry value is used (e.g. `"-"`).
 
 - **Path to SSL Certificate (.pem)**  
   The certificate used to validate secure HTTPS requests.  
@@ -77,13 +83,16 @@ See [About the SSL Certificate](#about-the-ssl-certificate) for instructions.
 - The application subscribes to a public Pusher channel.
 - It listens for `start-monitoring` and `stop-monitoring` events.
 - While monitoring is active, vital signs are sent via HTTP POST to your configured API endpoint using Basic Auth.
+- Temperature appears only under `data.vitalSigns.temperature` (no separate `thermometer` field in the payload).
 
 ---
 
 ## 🧯 Troubleshooting
 
 - Make sure your BerryMed device is turned on and Bluetooth is enabled (if using BT mode).
-- For USB mode, ensure the correct COM port is selected.
+- For USB mode, ensure the correct COM port is selected for the Berry (`DEVICE_PORT`).
+- Thermometer uses a **different** COM port (`THERMOMETER_PORT`); both cannot share the same port.
+- If temperature never updates from the USB thermometer, rebuild `berry-monitor.exe` with `poetry run pyinstaller berry-monitor.spec --clean --noconfirm` and check startup logs for `[THERM] Connected to COMx`.
 - Install the [Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist) if you encounter missing DLL errors.
 
 ---
@@ -92,6 +101,22 @@ See [About the SSL Certificate](#about-the-ssl-certificate) for instructions.
 
 1. Run `berry-configure.exe` to set up your credentials and certificate path.
 2. Then run `berry-monitor.exe` to start monitoring your BerryMed device.
+
+---
+
+## Building from source (Windows)
+
+Guía resumida; el paso a paso completo está en [development.md — Building Executables on Windows](development.md#building-executables-on-windows-step-by-step).
+
+1. Instalar Python 3.11+ y [Poetry](https://python-poetry.org/) en Windows.
+2. Clonar el repo y abrir terminal en la carpeta `berry_med`.
+3. `poetry install`
+4. `poetry run pyinstaller berry-configure.spec --clean --noconfirm`
+5. `poetry run pyinstaller berry-monitor.spec --clean --noconfirm`
+6. Ejecutar `dist\berry-configure.exe` (configura credenciales en AppData).
+7. Ejecutar `dist\berry-monitor.exe` (monitoreo).
+
+Salida en `dist\`: `berry-configure.exe` y `berry-monitor.exe`. Tras cambios de código, repetir el build del exe afectado con `--clean`.
 
 ---
 
