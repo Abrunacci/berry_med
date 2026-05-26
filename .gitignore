@@ -1,2 +1,7 @@
 *.pyc
 __pycache__/
+build/
+.venv/
+poetry.lock
+.cursorignore
+.cursorrules
