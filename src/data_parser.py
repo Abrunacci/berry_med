@@ -7,6 +7,11 @@ class BMDataParser:
     PACKAGE_MIN_LENGTH = 4
     PACKAGE_HEADER = [0x55, 0xAA]
 
+    # Centinela de "sin dato". Estaba repetido en cada dict de defaults; se
+    # define acá porque `reset_nibp()` necesita el mismo valor exacto que
+    # reconoce `_is_valid_data` en la app.
+    NO_VALUE = "- - /- -"
+
     def __init__(self):
         self.raw_buffer = []
         self.callbacks: Dict[int, Tuple[str, Optional[Callable]]] = {
@@ -28,8 +33,8 @@ class BMDataParser:
             "resp": [],   # Respiratory waveform
             "vitalSigns": {
                 "heartRate": "- -",
-                "nibp": "- - /- -",
-                "spo2Pulse": "- - /- -",
+                "nibp": self.NO_VALUE,
+                "spo2Pulse": self.NO_VALUE,
                 "temperature": "- -",
                 "respRate": "- -",
             },
@@ -195,9 +200,23 @@ class BMDataParser:
             "resp": [],
             "vitalSigns": {
                 "heartRate": "- -",
-                "nibp": "- - /- -",
-                "spo2Pulse": "- - /- -",
+                "nibp": self.NO_VALUE,
+                "spo2Pulse": self.NO_VALUE,
                 "temperature": "- -",
                 "respRate": "- -",
             },
         }
+
+    def reset_nibp(self):
+        """Borra sólo la presión, sin tocar el resto de la sesión.
+
+        La usa la app al pedir una medición nueva. No sirve `reset_data()`:
+        eso borraría también SpO2, temperatura, pulso y las ondas, que siguen
+        llegando en vivo y no tienen nada que ver con el manguito.
+
+        Hace falta porque el parser no pisa el valor cuando el equipo manda
+        sistólica/diastólica en cero — que es lo que manda mientras infla — así
+        que sin esto la medición anterior se sigue publicando como si fuera la
+        de ahora durante todo el inflado.
+        """
+        self.data["vitalSigns"]["nibp"] = self.NO_VALUE

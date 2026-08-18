@@ -262,6 +262,13 @@ class VitalsMonitor:
         """Handle the start blood pressure measurement event"""
         try:
             print("[DEBUG] Starting blood pressure measurement")
+            # Limpiar la presión anterior ANTES de arrancar. Mientras el
+            # manguito infla, el equipo manda el 0x03 con sistólica y
+            # diastólica en cero, y el parser no pisa el valor con ceros: sin
+            # esto, la medición anterior se sigue publicando como si fuera la
+            # de ahora durante todo el inflado. Se limpia sólo el NIBP; el
+            # resto de los signos siguen llegando en vivo.
+            self.data_parser.reset_nibp()
             if self.main_loop:
                 future = asyncio.run_coroutine_threadsafe(
                     self.monitor.start_nibp(),
