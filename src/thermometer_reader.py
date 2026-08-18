@@ -45,6 +45,16 @@ class ThermometerReader:
                 return None
             return dict(self._latest)
 
+    def reset_latest(self) -> None:
+        """Descarta la última lectura, sin cortar la conexión al termómetro.
+
+        La usa la app al arrancar una medición: el valor guardado no vence solo,
+        así que sin esto la temperatura de la sesión anterior se sigue copiando
+        al payload hasta que llegue una lectura nueva por el puerto.
+        """
+        with self._latest_lock:
+            self._latest = None
+
     def _run_loop(self) -> None:
         while self._running:
             try:

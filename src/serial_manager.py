@@ -1,14 +1,13 @@
 import serial, threading, time, asyncio
 
-HEADER = b"\x55\xAA"
-
-def _cs(n, payload):                 # checksum
-    return (~(n + sum(payload)) & 0xFF) & 0xFF
-
-def _cmd(a1, a2):
-    payload = bytes([a1, a2])
-    n = len(payload) + 2
-    return HEADER + bytes([n]) + payload + bytes([_cs(n, payload)])
+from src.pm6750_protocol import (
+    CMD_NIBP,
+    HEADER,
+    build_command as _cmd,
+    build_nibp_commands,
+    build_startup_commands,
+    checksum as _cs,
+)
 
 class PM6750USBReader:
     """
@@ -21,10 +20,11 @@ class PM6750USBReader:
     Mantiene la misma interfaz que el Bluetooth para que la app
     no tenga que distinguir el tipo de conexión.
     """
-    def __init__(self, parser, port="COM4", baud=115200):
+    def __init__(self, parser, port="COM4", baud=115200, device_config=None):
         self.parser = parser
         self.port   = port
         self.baud   = baud
+        self.device_config = device_config or {}
         self.ser    = None
         self._run   = False
         self._t     = None              # hilo de lectura
@@ -36,7 +36,14 @@ class PM6750USBReader:
         )
 
     def reset_state(self):
-        """Limpia por completo el estado de NIBP y timeouts."""
+        """Limpia por completo el estado de NIBP y timeouts.
+
+        Incluye mandarle STOP al equipo: bajar `nibp_running` sólo limpia lo
+        que creemos nosotros. Si la sesión anterior quedó a mitad de una
+        medición (nadie cerró, se cortó la conexión, el operador arrancó una
+        nueva), el manguito puede seguir inflándose por su cuenta y nosotros
+        creeríamos que no hay nada corriendo.
+        """
         try:
             self.nibp_running = False
             if getattr(self, "_nibp_timeout_task", None):
@@ -45,11 +52,24 @@ class PM6750USBReader:
                 except Exception:
                     pass
                 self._nibp_timeout_task = None
-            # limpiar buffers del puerto para no “arrastrar” frames viejos
+
             if self.ser and self.ser.is_open:
+                # 1) descartar lo que hubiera encolado para escribir
+                try:
+                    self.ser.reset_output_buffer()
+                except Exception:
+                    pass
+                # 2) STOP de NIBP al equipo, y esperar a que salga de verdad
+                #    (va antes de limpiar el buffer de entrada para que el
+                #    reconocimiento del equipo caiga en una ventana limpia)
+                try:
+                    self.ser.write(_cmd(CMD_NIBP, 0x00))
+                    self.ser.flush()
+                except Exception as e:
+                    print(f"[USB] No se pudo mandar STOP de NIBP: {e}")
+                # 3) descartar frames viejos para no “arrastrar” la sesión previa
                 try:
                     self.ser.reset_input_buffer()
-                    self.ser.reset_output_buffer()
                 except Exception:
                     pass
         except Exception as e:
@@ -65,11 +85,8 @@ class PM6750USBReader:
         # self.parser.reset_data()
         if not (self.ser and self.ser.is_open):
             print("[USB] Puerto no abierto"); return
-        # Habilitar streams
-        for a1, a2 in (
-            (0x01,1), (0x03,1), (0x04,1),   # ECG / NIBP / SpO₂ / TEMP
-            (0xFB,1), (0xFE,1), (0xFF,1),             # ECG / SpO₂ / RESP waves
-        ):
+
+        for a1, a2 in build_startup_commands(self.device_config):
             self.ser.write(_cmd(a1, a2))
 
         self._run = True
@@ -148,7 +165,10 @@ class PM6750USBReader:
     def _start_nibp_sync(self):
         if self.ser and self.ser.is_open and not self.nibp_running:
             print("[USB] → start NIBP")
-            self.ser.write(_cmd(0x02, 0x01))
+            # Modo y presión objetivo van acá, justo antes de arrancar: el
+            # manual pide setearlos inmediatamente antes de cada medición.
+            for a1, a2 in build_nibp_commands(self.device_config):
+                self.ser.write(_cmd(a1, a2))
             self.nibp_running = True     # ← bloqueo hasta recibir resultado
 
     def _nibp_done(self, status, cuff, sys, mean, dia):
@@ -167,7 +187,7 @@ class PM6750USBReader:
             # si querés, asegurá STOP explícito al equipo:
             try:
                 if self.ser and self.ser.is_open:
-                    self.ser.write(_cmd(0x02, 0x00))  # STOP NIBP
+                    self.ser.write(_cmd(CMD_NIBP, 0x00))  # STOP NIBP
             except Exception:
                 pass
 
