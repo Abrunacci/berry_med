@@ -36,7 +36,14 @@ class PM6750USBReader:
         )
 
     def reset_state(self):
-        """Limpia por completo el estado de NIBP y timeouts."""
+        """Limpia por completo el estado de NIBP y timeouts.
+
+        Incluye mandarle STOP al equipo: bajar `nibp_running` sólo limpia lo
+        que creemos nosotros. Si la sesión anterior quedó a mitad de una
+        medición (nadie cerró, se cortó la conexión, el operador arrancó una
+        nueva), el manguito puede seguir inflándose por su cuenta y nosotros
+        creeríamos que no hay nada corriendo.
+        """
         try:
             self.nibp_running = False
             if getattr(self, "_nibp_timeout_task", None):
@@ -45,11 +52,24 @@ class PM6750USBReader:
                 except Exception:
                     pass
                 self._nibp_timeout_task = None
-            # limpiar buffers del puerto para no “arrastrar” frames viejos
+
             if self.ser and self.ser.is_open:
+                # 1) descartar lo que hubiera encolado para escribir
+                try:
+                    self.ser.reset_output_buffer()
+                except Exception:
+                    pass
+                # 2) STOP de NIBP al equipo, y esperar a que salga de verdad
+                #    (va antes de limpiar el buffer de entrada para que el
+                #    reconocimiento del equipo caiga en una ventana limpia)
+                try:
+                    self.ser.write(_cmd(0x02, 0x00))   # STOP NIBP
+                    self.ser.flush()
+                except Exception as e:
+                    print(f"[USB] No se pudo mandar STOP de NIBP: {e}")
+                # 3) descartar frames viejos para no “arrastrar” la sesión previa
                 try:
                     self.ser.reset_input_buffer()
-                    self.ser.reset_output_buffer()
                 except Exception:
                     pass
         except Exception as e:
