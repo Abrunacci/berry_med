@@ -81,21 +81,30 @@ class PM6750USBReader:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._connect_sync)
 
+    # Streams que se habilitan al conectar. NIBP (0x02) queda afuera a
+    # propósito: infla el manguito de verdad y al conectar no sabemos si el
+    # paciente lo tiene puesto.
+    STREAM_COMMANDS = (0x01, 0x03, 0x04, 0xFB, 0xFE, 0xFF)
+
+    def _send_enables(self):
+        """Habilita los streams de datos."""
+        for a1 in self.STREAM_COMMANDS:
+            self.ser.write(_cmd(a1, 1))
+        self.ser.flush()
+
+    def _start_reader(self):
+        """Arranca el hilo que lee del puerto."""
+        self._run = True
+        self._t = threading.Thread(target=self._loop, daemon=True)
+        self._t.start()
+        print("[USB] Lectura iniciada")
+
     def start_monitoring(self):
         # self.parser.reset_data()
         if not (self.ser and self.ser.is_open):
             print("[USB] Puerto no abierto"); return
-        # Habilitar streams
-        for a1, a2 in (
-            (0x01,1), (0x03,1), (0x04,1),   # ECG / NIBP / SpO₂ / TEMP
-            (0xFB,1), (0xFE,1), (0xFF,1),             # ECG / SpO₂ / RESP waves
-        ):
-            self.ser.write(_cmd(a1, a2))
-
-        self._run = True
-        self._t   = threading.Thread(target=self._loop, daemon=True)
-        self._t.start()
-        print("[USB] Lectura iniciada")
+        self._send_enables()
+        self._start_reader()
 
     def stop_monitoring(self):
         self._run = False
@@ -155,14 +164,88 @@ class PM6750USBReader:
         # await loop.run_in_executor(None, self._start_nibp_sync)
 
     # ---------- Internos ---------------------------------------------------
+    def _resync_device(self):
+        """Deja el equipo en un estado conocido, sin apagarlo.
+
+        Cuando se reinicia la PC y el Berry queda encendido, el bridge USB
+        enumera igual: el puerto abre aunque el equipo haya quedado a mitad de
+        una trama o de una medición de presión. Esto es lo más parecido a un
+        apagar-y-encender que se puede hacer por el cable: se tira lo que haya
+        en los buffers, se corta cualquier NIBP en curso y se apagan los
+        streams para que el equipo salga de mitad de transmisión antes de
+        volver a habilitarlos.
+        """
+        self.ser.reset_input_buffer()
+        self.ser.reset_output_buffer()
+
+        self.ser.write(_cmd(0x02, 0x00))          # STOP NIBP
+        for a1 in self.STREAM_COMMANDS:
+            self.ser.write(_cmd(a1, 0))           # apagar streams
+        self.ser.flush()
+
+        # Darle tiempo a procesar los comandos y descartar lo que haya salido
+        # como respuesta, para que la espera de datos arranque en limpio.
+        time.sleep(0.3)
+        self.ser.reset_input_buffer()
+
+    def _wait_for_data(self, timeout_sec: float = 5.0) -> bool:
+        """Espera a que llegue al menos una cabecera de trama válida.
+
+        Sin esto `connect()` devolvía True apenas abría el puerto, y `run()` se
+        quedaba en su bucle infinito dando la conexión por buena: si el equipo
+        no transmitía, la app parecía conectada y no reintentaba nunca. Eso es
+        lo que obligaba a apagar y prender el Berry a mano después de reiniciar
+        la PC.
+
+        Corre antes de arrancar el hilo lector, así no compiten los dos por el
+        puerto.
+        """
+        limite = time.monotonic() + timeout_sec
+        buf = bytearray()
+        while time.monotonic() < limite:
+            buf.extend(self.ser.read(64))
+            if HEADER in buf:
+                return True
+            if len(buf) > 4096:          # no crecer sin límite si llega basura
+                buf = buf[-1:]
+        return False
+
+    def _abort_connection(self):
+        """Cierra el puerto para que el próximo intento arranque de cero."""
+        self._run = False
+        try:
+            if self.ser and self.ser.is_open:
+                self.ser.close()
+        except Exception:
+            pass
+        self.ser = None
+
     def _connect_sync(self) -> bool:
         try:
             self.ser = serial.Serial(self.port, self.baud, timeout=0.3)
             print(f"[USB] Puerto {self.port} abierto")
-            self.start_monitoring()
-            return True
         except Exception as e:
             print(f"[USB] No se pudo abrir {self.port}: {e}")
+            return False
+
+        try:
+            self._resync_device()
+            self._send_enables()
+
+            # Abrir el puerto no prueba nada: el bridge USB enumera aunque el
+            # equipo esté colgado. Recién con datos reales damos la conexión
+            # por buena; si no llegan, se cierra y `run()` reintenta a los 5s.
+            if not self._wait_for_data():
+                print(f"[USB] {self.port} abre pero el equipo no transmite; "
+                      "se cierra y se reintenta")
+                self._abort_connection()
+                return False
+
+            self._start_reader()
+            return True
+        except Exception as e:
+            print(f"[USB] Error preparando {self.port}: {e}")
+            self._abort_connection()
             return False
 
     def _start_nibp_sync(self):
