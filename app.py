@@ -420,14 +420,25 @@ class VitalsMonitor:
 
     async def run(self):
         self.main_loop = asyncio.get_running_loop()  # Guardar referencia al loop principal
+        intento = 0
+        arranque = time.monotonic()
         while True:
             try:
-                print("\n[BERRY] Attempting to connect to Berry device...")
+                intento += 1
+                # El número de intento y el tiempo desde que arrancó el proceso
+                # son los dos datos que hacen falta para leer un arranque de
+                # Windows: dicen si conectó a la primera o cuántos segundos
+                # tardó en aparecer el puerto.
+                print(f"\n[BERRY] Intento #{intento} de conectar "
+                      f"(t+{time.monotonic() - arranque:.0f}s desde el arranque)")
                 connected = await self.monitor.connect()
                 if not connected:
                     print("[BERRY] Connection failed, retrying in 5 seconds...")
                     await asyncio.sleep(5)
                     continue
+
+                print(f"[BERRY] Conectado en el intento #{intento}, "
+                      f"t+{time.monotonic() - arranque:.0f}s")
 
                 asyncio.create_task(self.send_data())
                 asyncio.create_task(self.process_commands())

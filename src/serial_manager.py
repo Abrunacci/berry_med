@@ -200,14 +200,33 @@ class PM6750USBReader:
         Corre antes de arrancar el hilo lector, así no compiten los dos por el
         puerto.
         """
-        limite = time.monotonic() + timeout_sec
+        inicio = time.monotonic()
+        limite = inicio + timeout_sec
         buf = bytearray()
+        total = 0                 # bytes vistos, aunque se descarten
+
         while time.monotonic() < limite:
-            buf.extend(self.ser.read(64))
+            trozo = self.ser.read(64)
+            total += len(trozo)
+            buf.extend(trozo)
             if HEADER in buf:
+                print(f"[USB] Datos OK tras {time.monotonic() - inicio:.1f}s "
+                      f"({total} bytes)")
                 return True
             if len(buf) > 4096:          # no crecer sin límite si llega basura
                 buf = buf[-1:]
+
+        # Cuántos bytes llegaron distingue dos fallas muy distintas, y es el
+        # dato que decide para dónde seguir:
+        #   0 bytes  -> el equipo no transmite nada (no recibió los enables,
+        #               o está en reset)
+        #   >0 bytes -> transmite pero sin cabeceras válidas (baudios mal,
+        #               línea sucia, o el bridge todavía inicializando)
+        if total == 0:
+            print(f"[USB] {timeout_sec:.0f}s sin UN SOLO BYTE del equipo")
+        else:
+            print(f"[USB] {total} bytes en {timeout_sec:.0f}s pero ninguna "
+                  f"cabecera 55AA válida. Primeros bytes: {bytes(buf[:24]).hex()}")
         return False
 
     def _abort_connection(self):
@@ -276,10 +295,33 @@ class PM6750USBReader:
 
     def _loop(self):
         buf = bytearray()
+        sin_datos_desde = time.monotonic()
+        aviso_mudo = False
+
         while self._run and self.ser and self.ser.is_open:
-            data = self.ser.read(256)
+            try:
+                data = self.ser.read(256)
+            except Exception as e:
+                # Antes esto mataba el hilo en silencio: la app seguía viva y
+                # aparentemente conectada, sin recibir nada y sin reconectar.
+                # Ahora al menos queda escrito con qué murió.
+                print(f"[USB] LECTOR CAÍDO leyendo {self.port}: "
+                      f"{type(e).__name__}: {e}")
+                self._run = False
+                break
+
             if not data:
+                # Avisar una sola vez que el stream se cortó, con cuánto hace.
+                mudo = time.monotonic() - sin_datos_desde
+                if mudo > 5 and not aviso_mudo:
+                    print(f"[USB] Sin datos hace {mudo:.0f}s (puerto abierto)")
+                    aviso_mudo = True
                 continue
+
+            sin_datos_desde = time.monotonic()
+            if aviso_mudo:
+                print("[USB] Volvieron los datos")
+                aviso_mudo = False
             buf.extend(data)
             while len(buf) >= 3:
                 if buf[:2] != HEADER:
