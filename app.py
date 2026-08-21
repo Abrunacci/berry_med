@@ -12,7 +12,15 @@ import pysher
 from config import build_metrics_url, get_config
 from src.bluetooth_manager import BMPatientMonitor
 from src.data_parser import BMDataParser
+from src.logging_setup import setup as setup_logging
 from src.thermometer_reader import ThermometerReader
+
+# Lo primero de todo: la línea de abajo revienta con TypeError si get_config()
+# devuelve None, y sin esto un arranque fallido no deja ningún rastro — que es
+# justo lo que pasa cuando la app la levanta Windows sola y nadie está mirando.
+_LOG_PATH = setup_logging("berry-monitor")
+if _LOG_PATH:
+    print(f"[LOG] Guardando salida en: {_LOG_PATH}")
 
 os.environ["SSL_CERT_FILE"] = get_config()["ssl_cert_file"]
 
