@@ -60,6 +60,7 @@ def get_app_data_path() -> Path:
 
 
 DEFAULT_API_ENDPOINT = "metrics"
+DEFAULT_HEALTH_ENDPOINT = "health"
 
 
 def build_metrics_url(base, totem_id, endpoint=DEFAULT_API_ENDPOINT) -> str:
@@ -152,6 +153,16 @@ def get_config():
             # evento de stop; pasado eso el totem corta el envío y limpia solo.
             # 0 desactiva el corte. Ver docs/protocolo_berry.md §7.
             "max_session_minutes": float(credentials.get("MAX_SESSION_MINUTES", 30)),
+            # --- /health (ver src/health.py) ---------------------------------
+            # Último tramo de la URL a la que el tótem reporta su estado; cuelga
+            # de la misma base y el mismo TOTEM_ID que las métricas.
+            "health_endpoint": str(
+                credentials.get("HEALTH_ENDPOINT") or DEFAULT_HEALTH_ENDPOINT
+            ).strip().strip("/"),
+            # Cada cuántos segundos se reporta. 0 desactiva el reporte.
+            "health_interval_seconds": float(
+                credentials.get("HEALTH_INTERVAL_SECONDS") or 60
+            ),
             "device_connection": credentials.get("DEVICE_CONNECTION", "bt"),
             "device_port": credentials.get("DEVICE_PORT", "COM3"),
             "ssl_cert_file": credentials.get("SSL_CERT_FILE_PATH"),
@@ -188,6 +199,24 @@ def get_config():
     except Exception as e:
         print(f"Error reading credentials: {e}")
         return None
+
+
+SECRETOS = ("api_password", "api_username", "key", "ssl_cert_file")
+
+
+def redactar(config: dict) -> dict:
+    """Copia de la config apta para loguear.
+
+    `app.py` imprime la config al arrancar, y desde que la salida se duplica a
+    un archivo (`src/logging_setup.py`) eso deja la contraseña de la API y la
+    key de Pusher escritas en disco, en un log rotado que sobrevive al proceso.
+    El resto de las claves sí sirven para diagnosticar, así que se tapan sólo
+    los secretos en vez de dejar de loguear todo.
+    """
+    return {
+        k: ("***" if k in SECRETOS and v else v)
+        for k, v in (config or {}).items()
+    }
 
 
 PUSHER_CONFIG = get_config()

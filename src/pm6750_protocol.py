@@ -141,3 +141,84 @@ def build_nibp_commands(config=None, log=print):
     # Y recién ahora, el arranque de la medición.
     cmds.append((CMD_NIBP, 0x01))
     return cmds
+
+
+# --- Estado de los sensores (byte [4] de cada paquete) -----------------------
+# El equipo informa en cada paquete si su sensor está puesto y midiendo. Es la
+# única fuente que hay para saber que un electrodo se soltó o que no hay dedo en
+# el clip: no existe ningún comando para consultarlo, sólo viaja acá.
+#
+# Los valores salen del manual (docs/manual_berry.pdf) y están tabulados en
+# docs/protocolo_berry.md §6.
+
+# ECG (0x02): bits, no un enumerado.
+ECG_WEAK_SIGNAL_BIT = 0b01   # BIT0
+ECG_LEAD_OFF_BIT    = 0b10   # BIT1
+
+# SpO2 (0x04), temperatura (0x05): enumerados.
+SPO2_STATUS = {
+    0x00: "ok",
+    0x01: "sensor_suelto",
+    0x02: "sin_dedo",
+    0x03: "buscando_pulso",
+    0x04: "busqueda_demasiado_larga",
+}
+TEMP_STATUS = {
+    0x00: "ok",
+    0x01: "t1_suelto",
+    0x02: "t2_suelto",
+    0x03: "t1_y_t2_sueltos",
+}
+
+# NIBP (0x03): el estado del test vive en BIT5~2, no en el byte entero.
+NIBP_TEST_STATUS = {
+    0b0000: "terminado",
+    0b0001: "midiendo",
+    0b0010: "detenido",
+    0b0011: "presion_excedida",
+    0b0100: "manguito_flojo",
+    0b0101: "demoro_demasiado",
+    0b0110: "error",
+    0b0111: "interferencia",
+    0b1000: "sin_resultado",
+    0b1001: "inicializando",
+    0b1010: "inicializacion_terminada",
+}
+
+# Estados que significan "el sensor no está puesto o no puede medir". Se separan
+# de los de progreso (buscando_pulso, midiendo, inicializando) porque un tótem
+# que está midiendo no tiene un problema: está trabajando.
+SENSOR_DESCONECTADO = {
+    "electrodo_suelto",                                    # ECG
+    "sensor_suelto", "sin_dedo",                           # SpO2
+    "t1_suelto", "t2_suelto", "t1_y_t2_sueltos",           # temperatura
+    "manguito_flojo",                                      # NIBP
+}
+
+
+def decode_spo2_status(estado: int) -> str:
+    return SPO2_STATUS.get(estado & 0xFF, f"desconocido_0x{estado:02X}")
+
+
+def decode_temp_status(estado: int) -> str:
+    return TEMP_STATUS.get(estado & 0xFF, f"desconocido_0x{estado:02X}")
+
+
+def decode_nibp_status(estado: int) -> str:
+    """Estado del test de presión: BIT5~2 del byte, no el byte entero."""
+    test = (estado >> 2) & 0b1111
+    return NIBP_TEST_STATUS.get(test, f"desconocido_0b{test:04b}")
+
+
+def decode_ecg_status(estado: int) -> dict:
+    """El ECG informa con bits, no con un enumerado, así que además de los dos
+    booleanos se deriva un `status` con el mismo vocabulario que el resto de los
+    sensores. Electrodo suelto gana sobre señal débil: si el electrodo no está
+    puesto, que la señal sea débil es una consecuencia, no otro problema."""
+    lead_off = bool(estado & ECG_LEAD_OFF_BIT)
+    weak = bool(estado & ECG_WEAK_SIGNAL_BIT)
+    return {
+        "status": "electrodo_suelto" if lead_off else ("senal_debil" if weak else "ok"),
+        "leadOff": lead_off,
+        "weakSignal": weak,
+    }

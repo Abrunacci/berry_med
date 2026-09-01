@@ -9,10 +9,11 @@ import aiohttp
 import certifi
 import pysher
 
-from config import build_metrics_url, get_config
+from config import build_metrics_url, get_config, redactar
 from src.bluetooth_manager import BMPatientMonitor
 from src.data_parser import BMDataParser
 from src.logging_setup import setup as setup_logging
+from src.health import HealthReporter
 from src.thermometer_reader import ThermometerReader
 
 # Lo primero de todo: la línea de abajo revienta con TypeError si get_config()
@@ -29,7 +30,7 @@ class VitalsMonitor:
     def __init__(self):
         self.data_parser = BMDataParser()
         cfg = get_config()
-        print(cfg)
+        print(redactar(cfg))
         self.using_usb_monitor = cfg.get("device_connection", "bt") == "usb"
 
         if self.using_usb_monitor:
@@ -94,6 +95,17 @@ class VitalsMonitor:
         self.start_event_name = self.credentials["start_event_name"]
         self.stop_event_name = self.credentials["stop_event_name"]
 
+        self.health_url = self._build_api_url(self.credentials.get("health_endpoint"))
+        self.health_interval = float(
+            self.credentials.get("health_interval_seconds", 60)
+        )
+        self.health = HealthReporter(
+            str(self.credentials.get("totem_id") or ""), self.data_parser
+        )
+        print(f"[DEBUG] Endpoint de health: {self.health_url} "
+              f"(cada {self.health_interval:.0f}s)"
+              if self.health_interval else "[DEBUG] Health desactivado")
+
         self.is_sending_data = False
         # Tope de duración de una sesión sin stop. 0 = sin corte automático.
         self.max_session_seconds = (
@@ -104,6 +116,16 @@ class VitalsMonitor:
         # Bind connection handlers for the client
         self.pusher_subscriber.connection.bind(
             "pusher:connection_established", self.connect_handler
+        )
+        # Sin esto la caída de Pusher pasa desapercibida: el único bind que
+        # había era el de conexión establecida, así que la app no se enteraba
+        # de que dejó de recibir órdenes. El /health lee `connection.state`,
+        # pero además conviene que quede en el log cuándo se cortó.
+        self.pusher_subscriber.connection.bind(
+            "pusher:connection_failed", self._pusher_caido
+        )
+        self.pusher_subscriber.connection.bind(
+            "pusher:error", self._pusher_caido
         )
         self.pusher_subscriber.connect()
 
@@ -122,8 +144,12 @@ class VitalsMonitor:
             )
             self.thermometer_reader.start()
 
-    def _build_api_url(self) -> str:
-        """Endpoint de métricas: `{API_URL}/{TOTEM_ID}/{API_ENDPOINT}`.
+    def _build_api_url(self, endpoint=None) -> str:
+        """Arma `{API_URL}/{TOTEM_ID}/{endpoint}`.
+
+        Con `endpoint=None` devuelve el de métricas (`API_ENDPOINT`). Se le pasa
+        otro para el /health, que cuelga de la misma base y el mismo id: es el
+        mismo tótem informando otra cosa.
 
         `API_URL` es sólo la base del servicio: el id del tótem vive en
         `TOTEM_ID` y el último tramo en `API_ENDPOINT`, así una misma base
@@ -149,7 +175,7 @@ class VitalsMonitor:
         return build_metrics_url(
             self.credentials.get("api_base_url"),
             totem_id,
-            self.credentials.get("api_endpoint"),
+            endpoint if endpoint is not None else self.credentials.get("api_endpoint"),
         )
 
     def status_callback(self, message: str):
@@ -170,7 +196,9 @@ class VitalsMonitor:
         pass
 
     def handle_ecg(self, states: int, heart_rate: int, resp_rate: int):
-
+        # El estado de los sensores lo registra el parser (ver
+        # BMDataParser.sensor_status): acá no, porque en USB este callback ni
+        # siquiera se registra — lo toma serial_manager.
         pass
 
     def handle_ecg_peak(self):
@@ -182,16 +210,80 @@ class VitalsMonitor:
         pass
 
     def handle_spo2(self, states: int, spo2: int, pulse_rate: int):
-        
         pass
 
     def handle_temperature(self, states: int, temp: float):
-        
         pass
 
     def handle_nibp(self, states: int, cuff: int, sys: int, mean: int, dia: int):
-        
         pass
+
+    def _pusher_caido(self, data=None):
+        """Pusher se cayó o falló. Sólo se loguea: pysher reintenta solo.
+
+        Lo que importa es que quede registrado el momento — el /health informa
+        el estado actual, pero para entender un incidente hace falta saber
+        cuándo se cortó.
+        """
+        print(f"[PUSHER] Conexión caída o con error: {data}")
+
+    async def send_health(self):
+        """Postea el estado del tótem al backend, cada `health_interval`.
+
+        Es una tarea aparte y no un agregado al POST de métricas, por dos
+        razones. `send_data()` sólo corre con sesión activa, y el health importa
+        sobre todo cuando NO hay sesión: un tótem con el Berry desenchufado de
+        madrugada tiene que poder avisarlo. Y arranca antes de que el equipo
+        conecte, porque "el Berry no engancha" es justamente uno de los estados
+        que hay que poder reportar.
+
+        Nunca propaga excepciones: un backend caído o un error armando el
+        snapshot no puede tumbar el monitoreo.
+        """
+        if not self.health_interval:
+            print("[HEALTH] Desactivado (HEALTH_INTERVAL_SECONDS = 0)")
+            return
+
+        async with aiohttp.ClientSession() as session:
+            while True:
+                try:
+                    cuerpo = self._health_snapshot()
+                    async with session.post(
+                        self.health_url,
+                        json=cuerpo,
+                        headers={"Authorization": f"Basic {self.auth_token}",
+                                 "Content-Type": "application/json"},
+                    ) as resp:
+                        if resp.status not in (200, 201, 204):
+                            print(f"[HEALTH] El backend respondió {resp.status}")
+                        else:
+                            print(f"[HEALTH] {cuerpo['status']} "
+                                  f"(sensores sueltos: "
+                                  f"{cuerpo['disconnectedSensors'] or 'ninguno'})")
+                except Exception as e:
+                    print(f"[HEALTH] No se pudo reportar: {type(e).__name__}: {e}")
+                await asyncio.sleep(self.health_interval)
+
+    def _health_snapshot(self) -> dict:
+        """Foto del estado actual. Ver `src/health.py` para el objeto."""
+        try:
+            device = self.monitor.link_status()
+        except Exception as e:
+            # Un lector sin link_status() (o a medio construir) no puede dejar
+            # sin health al tótem: el resto del objeto sigue siendo útil.
+            device = {"connected": False, "lastFrameSecondsAgo": None,
+                      "error": f"{type(e).__name__}: {e}"}
+
+        transcurrido = (
+            round(time.monotonic() - self._sending_since, 1)
+            if self._sending_since is not None else None
+        )
+        return self.health.snapshot(
+            device=device,
+            pusher=self.pusher_subscriber,
+            session={"active": self.is_sending_data,
+                     "secondsElapsed": transcurrido},
+        )
 
     def connect_handler(self, data):
         """Handler for successful connection"""
@@ -460,6 +552,13 @@ class VitalsMonitor:
         self.main_loop = asyncio.get_running_loop()  # Guardar referencia al loop principal
         intento = 0
         arranque = time.monotonic()
+
+        # El health arranca ANTES del bucle de conexión, a propósito: "el Berry
+        # no engancha" es uno de los estados que hay que poder reportar, y si
+        # el reporte esperara a que el equipo conecte, ese caso justamente nunca
+        # se informaría.
+        asyncio.create_task(self.send_health())
+
         while True:
             try:
                 intento += 1

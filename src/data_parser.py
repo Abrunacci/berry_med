@@ -3,6 +3,14 @@ import time                # ← añadido
 from typing import Callable, Dict, Optional, Tuple
 
 
+from src.pm6750_protocol import (
+    decode_ecg_status,
+    decode_nibp_status,
+    decode_spo2_status,
+    decode_temp_status,
+)
+
+
 def _noop(*args, **kwargs) -> None:
     """Callback vacío, para cuando nadie registró uno."""
     return None
@@ -73,6 +81,12 @@ class BMDataParser:
             0xFF: ("on_resp_waveform_received", None),
         }
 
+        # Último estado informado por cada sensor del equipo, para el /health.
+        # Aparte de `self.data` a propósito: eso es el payload de métricas.
+        # No se limpia en `reset_data()` — el estado de un electrodo no depende
+        # de que empiece o termine una sesión.
+        self.sensor_status = {}
+
         # Data storage with default values
         self.data = {
             "spo2": [],   # SpO2 waveform
@@ -108,6 +122,21 @@ class BMDataParser:
     #         if callback_name == name:
     #             self.callbacks[key] = (callback_name, callback)
     #             break
+    def _record_sensor(self, sensor: str, status) -> None:
+        """Guarda el último estado que informó el equipo para un sensor.
+
+        Va acá y no en los callbacks de la app porque `register_callback()`
+        pisa: sólo puede haber un callback por evento, y en USB el de NIBP se
+        lo queda `serial_manager` para su control de la medición. El parser, en
+        cambio, ve todos los paquetes en los dos transportes.
+
+        Deliberadamente NO se guarda en `self.data`: eso viaja en el POST de
+        métricas y cambiaría ese contrato. El /health lo lee de acá.
+        """
+        entrada = {"status": status} if isinstance(status, str) else dict(status)
+        entrada["_t"] = time.monotonic()
+        self.sensor_status[sensor] = entrada
+
     def register_callback(self, name: str, callback: Callable) -> None:
         found = False
         for key, (callback_name, _) in self.callbacks.items():
@@ -275,6 +304,7 @@ class BMDataParser:
                 # Van en data["ecgInfo"] y no en vitalSigns porque _is_valid_data
                 # compara todos los vitalSigns como strings contra "- -"/"-".
                 self.data["ecgInfo"] = self._decode_ecg_info(package)
+                self._record_sensor("ecg", decode_ecg_status(package[4]))
                 callback(package[4], package[5], package[6])
 
             elif callback_name == "on_spo2_params_received":
@@ -292,12 +322,14 @@ class BMDataParser:
                     self.data["vitalSigns"]["spo2Pulse"] = "- - /- -"
                 else:
                     self.data["vitalSigns"]["spo2Pulse"] = f"{spo2_val}/{pulse_val}"
+                self._record_sensor("spo2", decode_spo2_status(package[4]))
                 callback(package[4], spo2, pulse)
 
             elif callback_name == "on_temp_params_received":
                 temp = (package[5] * 10 + package[6]) / 10.0
                 temp_str = self._format_value(temp)
                 self.data["vitalSigns"]["temperature"] = temp_str
+                self._record_sensor("temperature", decode_temp_status(package[4]))
                 callback(package[4], temp)
 
             elif callback_name == "on_nibp_params_received":
@@ -307,6 +339,7 @@ class BMDataParser:
                 dia_val = self._format_value(dia)
                 if sys != 0 or dia != 0:
                     self.data["vitalSigns"]["nibp"] = f"{sys_val}/{dia_val}"
+                self._record_sensor("nibp", decode_nibp_status(package[4]))
                 if package[4] == 0:
                     callback(package[4], package[5] * 2, sys, package[7], dia)
                 else: # retro compatibilidad con otras versiones

@@ -105,6 +105,21 @@ FIELDS = (
     Field("NIBP_MODE", "Modo de paciente (NIBP)", "PM6750", kind="choice",
           options=("adulto", "nino", "neonato"), default="adulto",
           help="Define el rango de presión del manguito."),
+
+    # ---------------------------------------------------------- Sesión ---
+    Field("MAX_SESSION_MINUTES", "Corte de sesión (minutos)", "API",
+          kind="int", default="30",
+          help="Si nunca llega el evento de stop, la sesión se corta sola "
+               "pasados estos minutos. 0 desactiva el corte."),
+
+    # ---------------------------------------------------------- Health ---
+    Field("HEALTH_ENDPOINT", "Endpoint de health", "API", default="health",
+          help="Último tramo de la URL a la que el tótem reporta su estado. "
+               "Cuelga de la misma base y el mismo Totem ID que las métricas."),
+    Field("HEALTH_INTERVAL_SECONDS", "Frecuencia de health (segundos)", "API",
+          kind="int", default="60",
+          help="Cada cuánto se reporta el estado del tótem. 0 desactiva el "
+               "reporte."),
 )
 
 BY_KEY = {f.key: f for f in FIELDS}

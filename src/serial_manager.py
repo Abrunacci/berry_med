@@ -30,6 +30,11 @@ class PM6750USBReader:
         self._t     = None              # hilo de lectura
         self.nibp_running = False       # ← flag
         self._nibp_timeout_task = None
+        # monotonic() de la última lectura con datos. None = todavía nunca
+        # llegó nada. Lo lee `link_status()` para el /health: es la única señal
+        # de vida real del enlace — que `connect()` haya dado True sólo dice
+        # que en algún momento hubo datos, no que siga habiéndolos.
+        self._ultimo_dato = None
         self.parser.register_callback(
             "on_nibp_params_received", self._nibp_done
         )
@@ -271,6 +276,33 @@ class PM6750USBReader:
             self._abort_connection()
             return False
 
+    def link_status(self) -> dict:
+        """Estado del enlace con el equipo, para el /health.
+
+        `connected` no es un flag que alguien setea al conectar: se deduce del
+        estado real —puerto abierto y el hilo lector vivo—, porque el flag
+        mentía. Si el lector muere a mitad de sesión, `run()` se queda en su
+        bucle creyendo que sigue todo bien; acá eso da `readerAlive: False`.
+
+        `lastFrameSecondsAgo` es la señal que de verdad importa: un enlace
+        abierto por el que hace 30s que no llega una trama está caído aunque el
+        puerto siga abierto.
+        """
+        abierto = bool(self.ser and self.ser.is_open)
+        vivo = bool(self._t and self._t.is_alive())
+        if self._ultimo_dato is None:
+            edad = None
+        else:
+            edad = round(time.monotonic() - self._ultimo_dato, 1)
+        return {
+            "transport": "usb",
+            "port": self.port,
+            "connected": abierto and vivo,
+            "portOpen": abierto,
+            "readerAlive": vivo,
+            "lastFrameSecondsAgo": edad,
+        }
+
     def _start_nibp_sync(self):
         if self.ser and self.ser.is_open and not self.nibp_running:
             print("[USB] → start NIBP")
@@ -304,6 +336,7 @@ class PM6750USBReader:
         buf = bytearray()
         sin_datos_desde = time.monotonic()
         aviso_mudo = False
+        self._ultimo_dato = sin_datos_desde
 
         while self._run and self.ser and self.ser.is_open:
             try:
@@ -326,6 +359,7 @@ class PM6750USBReader:
                 continue
 
             sin_datos_desde = time.monotonic()
+            self._ultimo_dato = sin_datos_desde
             if aviso_mudo:
                 print("[USB] Volvieron los datos")
                 aviso_mudo = False

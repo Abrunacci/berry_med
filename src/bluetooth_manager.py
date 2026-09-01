@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import Callable, Optional
 
 from bleak import BleakClient, BleakScanner
@@ -29,6 +30,11 @@ class BMPatientMonitor:
         self.reconnect_interval = 5  # seconds between reconnection attempts
         self.is_device_active = False
         self.last_data_timestamp = 0
+        # monotonic() de la última notificación BLE. Va aparte de
+        # `last_data_timestamp`, que usa el reloj del event loop: el /health se
+        # arma desde otra tarea y necesita un reloj comparable con el del lector
+        # USB. None = todavía nunca llegó nada.
+        self._ultimo_dato = None
 
     async def connect(self) -> bool:
         while True:
@@ -118,8 +124,32 @@ class BMPatientMonitor:
     def _handle_data(self, _, data: bytearray):
         # Update last data timestamp
         self.last_data_timestamp = asyncio.get_event_loop().time()
+        self._ultimo_dato = time.monotonic()
         self.is_device_active = True
         self.data_parser.add_data(data)
+
+    def link_status(self) -> dict:
+        """Estado del enlace con el equipo, para el /health.
+
+        Mismo contrato que `PM6750USBReader.link_status()`, para que el health
+        no tenga que saber por qué transporte está conectado el tótem.
+
+        `connected` sale de `client.is_connected` y no del flag `self.connected`,
+        que lo setea `connect()` y nadie lo baja cuando el enlace se cae solo.
+        """
+        vivo = bool(self.client and self.client.is_connected)
+        if self._ultimo_dato is None:
+            edad = None
+        else:
+            edad = round(time.monotonic() - self._ultimo_dato, 1)
+        return {
+            "transport": "bt",
+            "port": self.DEVICE_NAME,
+            "connected": vivo,
+            "portOpen": vivo,
+            "readerAlive": vivo,
+            "lastFrameSecondsAgo": edad,
+        }
 
     async def check_connection(self):
         """Check if device is still connected and sending valid data"""
