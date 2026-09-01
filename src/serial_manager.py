@@ -1,12 +1,7 @@
 import serial, threading, time, asyncio
 
 from src.pm6750_protocol import (
-    CMD_ECG,
     CMD_NIBP,
-    CMD_RESP_WAVE,
-    CMD_SPO2,
-    CMD_SPO2_WAVE,
-    CMD_TEMP,
     HEADER,
     build_command as _cmd,
     build_nibp_commands,
@@ -35,13 +30,6 @@ class PM6750USBReader:
         self._t     = None              # hilo de lectura
         self.nibp_running = False       # ← flag
         self._nibp_timeout_task = None
-        # Intentos de conexión seguidos en los que el equipo no mandó datos.
-        # Es el nivel de la escalada de `_preparar()`; se pone en cero al
-        # conectar. No lo tocan los fallos de apertura del puerto: que COM6 no
-        # exista todavía es otra cosa (pasa 40s después de arrancar Windows) y
-        # no tiene sentido escalar por eso.
-        self._fallos = 0
-
         self.parser.register_callback(
             "on_nibp_params_received", self._nibp_done
         )
@@ -91,13 +79,6 @@ class PM6750USBReader:
         """Abre el puerto y arranca la lectura (async para la app)."""
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._connect_sync)
-
-    # Streams que apaga el resync. Los enables ya no salen de acá: los arma
-    # `build_startup_commands()`, que además manda la configuración. NIBP (0x02)
-    # queda afuera a propósito: infla el manguito de verdad y al conectar no
-    # sabemos si el paciente lo tiene puesto. Tampoco está el viejo 0xFB, que no
-    # existe en el protocolo y era un no-op (ver docs/ecg.md).
-    STREAM_COMMANDS = (CMD_ECG, CMD_SPO2, CMD_TEMP, CMD_SPO2_WAVE, CMD_RESP_WAVE)
 
     def _send_enables(self):
         """Configura el equipo y habilita los streams de datos.
@@ -190,94 +171,6 @@ class PM6750USBReader:
         # await loop.run_in_executor(None, self._start_nibp_sync)
 
     # ---------- Internos ---------------------------------------------------
-    def _resync_device(self):
-        """Deja el equipo en un estado conocido, sin apagarlo.
-
-        El puerto abre aunque el equipo haya quedado a mitad de una trama o de
-        una medición de presión: el CDC-ACM enumera igual. Se tira lo que haya
-        en los buffers, se corta cualquier NIBP en curso y se apagan los streams
-        para que el equipo salga de mitad de transmisión antes de volver a
-        habilitarlos.
-
-        Sirve para un equipo que responde pero quedó desincronizado. Contra el
-        equipo trabado tras reiniciar la PC no hace nada — eso sólo sale
-        cortándole la alimentación, ver `_preparar()`.
-
-        Ojo con el apagado de streams: si el equipo acepta el disable pero
-        ignora el enable que viene después, esto lo deja mudo. Por eso no corre
-        en el primer intento.
-        """
-        self.ser.reset_input_buffer()
-        self.ser.reset_output_buffer()
-
-        datos = _cmd(CMD_NIBP, 0x00)               # STOP NIBP
-        datos += b"".join(_cmd(a1, 0) for a1 in self.STREAM_COMMANDS)
-        self.ser.write(datos)
-        self.ser.flush()
-        print(f"[USB] -> resync stop+disables ({len(datos)}B): {datos.hex()}")
-
-        # Darle tiempo a procesar los comandos y descartar lo que haya salido
-        # como respuesta, para que la espera de datos arranque en limpio.
-        time.sleep(0.3)
-        self.ser.reset_input_buffer()
-
-    def _estado_lineas(self, cuando: str):
-        """Loguea la config real del puerto. Las líneas van sólo de referencia.
-
-        Ojo con leerles sentido a cts/dsr: el COM6 del Berry no es un bridge
-        sino un CDC-ACM nativo del STM32 (VID_0483 PID_5740, usbser.inf), y esas
-        líneas salen de una notificación SERIAL_STATE que su firmware nunca
-        emite. Dan `False` siempre, con el equipo sano y con el equipo mudo —
-        medido el 21/08 en las dos condiciones. No discriminan nada.
-        """
-        try:
-            print(f"[USB] Líneas {cuando}: "
-                  f"cts={self.ser.cts} dsr={self.ser.dsr} cd={self.ser.cd} "
-                  f"ri={self.ser.ri} | rts={self.ser.rts} dtr={self.ser.dtr} "
-                  f"| {self.ser.baudrate}-{self.ser.bytesize}"
-                  f"{self.ser.parity}{self.ser.stopbits} "
-                  f"rtscts={self.ser.rtscts} dsrdtr={self.ser.dsrdtr} "
-                  f"xonxoff={self.ser.xonxoff}")
-        except Exception as e:
-            print(f"[USB] No se pudo leer el estado de líneas: "
-                  f"{type(e).__name__}: {e}")
-
-    def _preparar(self, nivel: int):
-        """Prepara el equipo para transmitir. Dos niveles, y nada más.
-
-            0   enables a secas
-            1+  + resync (stop de NIBP y apagar/prender streams)
-
-        Acá hubo una escalada de cuatro niveles que agregaba un pulso de DTR/RTS
-        y un break de línea. Se sacaron: sobre este hardware **no pueden hacer
-        nada**. El COM6 no es un bridge CP210x/CH340 sino un CDC-ACM nativo del
-        STM32 (VID_0483 PID_5740, driver usbser.inf), así que DTR/RTS es un
-        SET_CONTROL_LINE_STATE y el break un SEND_BREAK: dos control requests
-        por USB que el firmware ignora, no señales físicas atadas al reset del
-        micro. Los logs del 20 y 21/08 lo confirman — decenas de pulsos y breaks,
-        escalada hasta el nivel 10, cero recuperaciones.
-
-        Cuando el equipo queda mudo no hay nada que esta función pueda hacer:
-        está trabado el stack USB del STM32 y sólo sale cortándole la
-        alimentación. Se probó y falló: `pnputil /restart-device`, y desenchufar
-        el cable en vivo con el equipo alimentado (log del 21/08 12:48 — Windows
-        reenumeró limpio y siguió sin transmitir). La única salida conocida es
-        apagar y prender el equipo a mano; `run()` sigue reintentando cada 5s y
-        engancha solo cuando eso pasa.
-        """
-        if nivel == 0:
-            # Cuando el equipo está vivo ya viene transmitiendo solo: en el log
-            # conecta con "Datos OK tras 0.0s (64 bytes)", o sea que había datos
-            # antes de que mandáramos nada. Ahí apagarle los streams para volver
-            # a prenderlos es riesgo sin beneficio. El buffer se limpia igual,
-            # que no toca al equipo, para no dar por buenos bytes viejos.
-            self.ser.reset_input_buffer()
-            self._send_enables()
-            return
-
-        self._resync_device()
-        self._send_enables()
-
     def _wait_for_data(self, timeout_sec: float = 5.0) -> bool:
         """Espera a que llegue al menos una cabecera de trama válida.
 
@@ -335,31 +228,41 @@ class PM6750USBReader:
         except Exception as e:
             # Que el puerto no exista todavía no es el equipo colgado: después
             # de arrancar Windows COM6 puede tardar casi un minuto en aparecer.
-            # No cuenta para la escalada.
             print(f"[USB] No se pudo abrir {self.port}: {e}")
             return False
 
-        # La escalada tiene un solo escalón útil, así que satura en 1.
-        nivel = min(self._fallos, 1)
-        print(f"[USB] Puerto {self.port} abierto (recuperación nivel {nivel})")
-        self._estado_lineas("al abrir")
+        print(f"[USB] Puerto {self.port} abierto")
 
         try:
-            self._preparar(nivel)
+            # Se limpia el buffer y se manda la secuencia de arranque, y nada
+            # más. No se le apagan los streams para volver a prenderlos: cuando
+            # el equipo está vivo ya viene transmitiendo solo —en el log conecta
+            # con "Datos OK tras 0.0s (64 bytes)", o sea que había datos antes
+            # de que mandáramos nada— así que el apagado es riesgo sin
+            # beneficio: si acepta el disable e ignora el enable, lo dejamos
+            # mudo nosotros.
+            #
+            # Y cuando el equipo ya está mudo no hay nada que se pueda hacer
+            # desde acá: está trabado el stack USB del STM32 y sólo sale
+            # cortándole la alimentación. Descartado por logs del 20 y 21/08:
+            # pulsos de DTR/RTS y breaks de línea (sobre un CDC-ACM nativo son
+            # control requests que el firmware ignora, no señales atadas al
+            # reset del micro), `pnputil /restart-device`, y desenchufar el
+            # cable en vivo con el equipo alimentado (21/08 12:48 — Windows
+            # reenumeró limpio y siguió sin transmitir). `run()` reintenta cada
+            # 5s y engancha solo cuando alguien lo apaga y lo prende.
+            self.ser.reset_input_buffer()
+            self._send_enables()
 
             # Abrir el puerto no prueba nada: el bridge USB enumera aunque el
             # equipo esté colgado. Recién con datos reales damos la conexión
             # por buena; si no llegan, se cierra y `run()` reintenta a los 5s.
             if not self._wait_for_data(5.0):
-                self._fallos += 1
-                print(f"[USB] {self.port} abre pero el equipo no transmite "
-                      f"(nivel {nivel}); se cierra y se reintenta")
+                print(f"[USB] {self.port} abre pero el equipo no transmite; "
+                      "se cierra y se reintenta")
                 self._abort_connection()
                 return False
 
-            if nivel > 0:
-                print(f"[USB] Recuperado en el nivel {nivel}")
-            self._fallos = 0
             self._start_reader()
             return True
         except Exception as e:
