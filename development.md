@@ -64,6 +64,8 @@ python tools/mock_api_server.py
 ```
 
 Set `API_URL` in credentials to `http://127.0.0.1:8080/vitals` (use `127.0.0.1`, not `0.0.0.0`).
+It is a **base** URL: the app posts to `{API_URL}/{TOTEM_ID}/metrics`. The mock server
+accepts any path, so no extra setup is needed.
 
 ---
 
@@ -310,6 +312,10 @@ En `credentials.json`, temporalmente:
 ```
 
 Usá `127.0.0.1`, no `0.0.0.0` (el cliente no puede conectar a `0.0.0.0`).
+
+`API_URL` es la **base**: la app postea a `{API_URL}/{TOTEM_ID}/metrics`, o sea
+`http://127.0.0.1:8080/vitals/<totem>/metrics`. El mock acepta cualquier ruta,
+así que no hay nada más que configurar.
 
 Terminal 2 — monitor:
 

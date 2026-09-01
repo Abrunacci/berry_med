@@ -5,3 +5,4 @@ build/
 poetry.lock
 .cursorignore
 .cursorrules
+captura.bin

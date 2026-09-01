@@ -38,9 +38,12 @@ class VitalsMonitor:
             self.monitor = PM6750USBReader(
                 parser=self.data_parser,
                 port=cfg.get("device_port", "COM3"),
+                device_config=cfg,
             )
         else:
-            self.monitor = BMPatientMonitor(self.data_parser, self.status_callback)
+            self.monitor = BMPatientMonitor(
+                self.data_parser, self.status_callback, device_config=cfg
+            )
         
         # self.monitor = BMPatientMonitor(self.data_parser, self.status_callback)
         self.main_loop = None  # Almacenar el loop principal
@@ -56,6 +59,9 @@ class VitalsMonitor:
             "on_resp_waveform_received", self.handle_resp_wave
         )
         self.data_parser.register_callback("on_ecg_params_received", self.handle_ecg)
+        self.data_parser.register_callback(
+            "on_ecg_peak_received", self.handle_ecg_peak
+        )
         self.data_parser.register_callback("on_spo2_params_received", self.handle_spo2)
         self.data_parser.register_callback(
             "on_temp_params_received", self.handle_temperature
@@ -164,7 +170,15 @@ class VitalsMonitor:
         pass
 
     def handle_ecg(self, states: int, heart_rate: int, resp_rate: int):
-        
+
+        pass
+
+    def handle_ecg_peak(self):
+        """Latido (QRS) detectado por el equipo.
+
+        El parser ya lo guarda en data["ecgPeaks"] para que viaje en el POST;
+        este callback existe para poder reaccionar en vivo (p. ej. un beep).
+        """
         pass
 
     def handle_spo2(self, states: int, spo2: int, pulse_rate: int):
@@ -217,7 +231,7 @@ class VitalsMonitor:
         # Ojo: `self.data_parser`, no `self.monitor.parser`. El lector USB
         # expone el parser como `.parser` pero el de Bluetooth lo guarda en
         # `.data_parser`, así que `self.monitor.parser` reventaba con
-        # AttributeError en las instalaciones por BT.
+        # AttributeError en las instalaciones por BT — que son el default.
         try:
             self.data_parser.reset_data()
         except Exception as e:
@@ -320,7 +334,7 @@ class VitalsMonitor:
                     max_retries = 3
                     for attempt in range(max_retries):
                         try:
-                            print(f"[DEBUG] Sending data: {data}")
+                            print(f"[DEBUG] Sending data: {self._summarize(data)}")
                             async with session.post(
                                 self.api_url,
                                 json=payload,
@@ -353,6 +367,28 @@ class VitalsMonitor:
                     print(f"[ERROR] Error in send_data loop: {e}")
 
                 await asyncio.sleep(1)
+
+    @staticmethod
+    def _summarize(data):
+        """Resumen del payload para el log.
+
+        Se envían 7 derivaciones de ECG a ~251 Hz (~1.750 valores/seg), así que
+        volcar el payload entero al stdout cada segundo lo vuelve ilegible. Se
+        loguean los signos vitales y el largo de cada onda; el payload que se
+        manda a la API no cambia.
+        """
+        waves = {key: len(data.get(key, [])) for key in ("spo2", "resp")}
+        leads = {
+            lead: len(values)
+            for lead, values in (data.get("ecg") or {}).items()
+        }
+        return {
+            "vitalSigns": data.get("vitalSigns", {}),
+            "waveLens": waves,
+            "ecgLens": leads,
+            "ecgPeaks": len(data.get("ecgPeaks", [])),
+            "ecgInfo": data.get("ecgInfo", {}),
+        }
 
     def _apply_thermometer_temperature(self, data):
         if not self.thermometer_reader:
@@ -412,7 +448,9 @@ class VitalsMonitor:
 
         # Check waveforms
         spo2_empty = all(v == 0 for v in data.get("spo2", []))
-        ecg_empty = len(data.get("ecg", [])) == 0
+        # "ecg" es un dict de 7 derivaciones: está vacío si ninguna trae datos.
+        # (Un len() sobre el dict daría 7 siempre y nunca sería "vacío".)
+        ecg_empty = not any(data.get("ecg", {}).values())
         resp_empty = len(data.get("resp", [])) == 0
 
         # Data is valid only if we have some vital signs OR some non-zero waveform data

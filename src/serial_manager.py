@@ -1,14 +1,18 @@
 import serial, threading, time, asyncio
 
-HEADER = b"\x55\xAA"
-
-def _cs(n, payload):                 # checksum
-    return (~(n + sum(payload)) & 0xFF) & 0xFF
-
-def _cmd(a1, a2):
-    payload = bytes([a1, a2])
-    n = len(payload) + 2
-    return HEADER + bytes([n]) + payload + bytes([_cs(n, payload)])
+from src.pm6750_protocol import (
+    CMD_ECG,
+    CMD_NIBP,
+    CMD_RESP_WAVE,
+    CMD_SPO2,
+    CMD_SPO2_WAVE,
+    CMD_TEMP,
+    HEADER,
+    build_command as _cmd,
+    build_nibp_commands,
+    build_startup_commands,
+    checksum as _cs,
+)
 
 class PM6750USBReader:
     """
@@ -21,10 +25,11 @@ class PM6750USBReader:
     Mantiene la misma interfaz que el Bluetooth para que la app
     no tenga que distinguir el tipo de conexión.
     """
-    def __init__(self, parser, port="COM4", baud=115200):
+    def __init__(self, parser, port="COM4", baud=115200, device_config=None):
         self.parser = parser
         self.port   = port
         self.baud   = baud
+        self.device_config = device_config or {}
         self.ser    = None
         self._run   = False
         self._t     = None              # hilo de lectura
@@ -69,7 +74,7 @@ class PM6750USBReader:
                 #    (va antes de limpiar el buffer de entrada para que el
                 #    reconocimiento del equipo caiga en una ventana limpia)
                 try:
-                    self.ser.write(_cmd(0x02, 0x00))   # STOP NIBP
+                    self.ser.write(_cmd(CMD_NIBP, 0x00))   # STOP NIBP
                     self.ser.flush()
                 except Exception as e:
                     print(f"[USB] No se pudo mandar STOP de NIBP: {e}")
@@ -87,19 +92,28 @@ class PM6750USBReader:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._connect_sync)
 
-    # Streams que se habilitan al conectar. NIBP (0x02) queda afuera a
-    # propósito: infla el manguito de verdad y al conectar no sabemos si el
-    # paciente lo tiene puesto.
-    STREAM_COMMANDS = (0x01, 0x03, 0x04, 0xFB, 0xFE, 0xFF)
+    # Streams que apaga el resync. Los enables ya no salen de acá: los arma
+    # `build_startup_commands()`, que además manda la configuración. NIBP (0x02)
+    # queda afuera a propósito: infla el manguito de verdad y al conectar no
+    # sabemos si el paciente lo tiene puesto. Tampoco está el viejo 0xFB, que no
+    # existe en el protocolo y era un no-op (ver docs/ecg.md).
+    STREAM_COMMANDS = (CMD_ECG, CMD_SPO2, CMD_TEMP, CMD_SPO2_WAVE, CMD_RESP_WAVE)
 
     def _send_enables(self):
-        """Habilita los streams de datos.
+        """Configura el equipo y habilita los streams de datos.
+
+        La secuencia la arma `build_startup_commands()`: primero la ganancia y
+        el modo de ECG (que salen de la config), después los enables, para que
+        las muestras salgan ya con la configuración pedida. NIBP queda afuera a
+        propósito — ver el docstring de esa función.
 
         Se escribe todo junto y se loguea en hex: el equipo no hace eco de los
-        comandos, así que si queda mudo la única evidencia de que los enables
-        salieron de esta punta del cable es esta línea.
+        comandos, así que si queda mudo la única evidencia de que la secuencia
+        salió de esta punta del cable es esta línea.
         """
-        datos = b"".join(_cmd(a1, 1) for a1 in self.STREAM_COMMANDS)
+        datos = b"".join(
+            _cmd(a1, a2) for a1, a2 in build_startup_commands(self.device_config)
+        )
         self.ser.write(datos)
         self.ser.flush()
         print(f"[USB] -> enables ({len(datos)}B): {datos.hex()}")
@@ -196,7 +210,7 @@ class PM6750USBReader:
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()
 
-        datos = _cmd(0x02, 0x00)                   # STOP NIBP
+        datos = _cmd(CMD_NIBP, 0x00)               # STOP NIBP
         datos += b"".join(_cmd(a1, 0) for a1 in self.STREAM_COMMANDS)
         self.ser.write(datos)
         self.ser.flush()
@@ -357,7 +371,10 @@ class PM6750USBReader:
     def _start_nibp_sync(self):
         if self.ser and self.ser.is_open and not self.nibp_running:
             print("[USB] → start NIBP")
-            self.ser.write(_cmd(0x02, 0x01))
+            # Modo y presión objetivo van acá, justo antes de arrancar: el
+            # manual pide setearlos inmediatamente antes de cada medición.
+            for a1, a2 in build_nibp_commands(self.device_config):
+                self.ser.write(_cmd(a1, a2))
             self.nibp_running = True     # ← bloqueo hasta recibir resultado
 
     def _nibp_done(self, status, cuff, sys, mean, dia):
@@ -376,7 +393,7 @@ class PM6750USBReader:
             # si querés, asegurá STOP explícito al equipo:
             try:
                 if self.ser and self.ser.is_open:
-                    self.ser.write(_cmd(0x02, 0x00))  # STOP NIBP
+                    self.ser.write(_cmd(CMD_NIBP, 0x00))  # STOP NIBP
             except Exception:
                 pass
 
