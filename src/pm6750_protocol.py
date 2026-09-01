@@ -156,18 +156,21 @@ ECG_WEAK_SIGNAL_BIT = 0b01   # BIT0
 ECG_LEAD_OFF_BIT    = 0b10   # BIT1
 
 # SpO2 (0x04), temperatura (0x05): enumerados.
+# Ojo con la diferencia, que el manual marca explícitamente y es la que decide
+# si algo es una alerta o no: "sensor off" es la sonda desconectada del equipo,
+# "no finger" es la sonda puesta y sin paciente.
 SPO2_STATUS = {
     0x00: "ok",
-    0x01: "sensor_suelto",
-    0x02: "sin_dedo",
+    0x01: "sensor_desconectado",   # manual: "sensor off"
+    0x02: "sin_paciente",          # manual: "no finger"
     0x03: "buscando_pulso",
     0x04: "busqueda_demasiado_larga",
 }
 TEMP_STATUS = {
     0x00: "ok",
-    0x01: "t1_suelto",
-    0x02: "t2_suelto",
-    0x03: "t1_y_t2_sueltos",
+    0x01: "t1_desconectado",       # manual: "T1 sensor off"
+    0x02: "t2_desconectado",
+    0x03: "t1_y_t2_desconectados",
 }
 
 # NIBP (0x03): el estado del test vive en BIT5~2, no en el byte entero.
@@ -188,11 +191,28 @@ NIBP_TEST_STATUS = {
 # Estados que significan "el sensor no está puesto o no puede medir". Se separan
 # de los de progreso (buscando_pulso, midiendo, inicializando) porque un tótem
 # que está midiendo no tiene un problema: está trabajando.
+# Falla de infraestructura: la sonda no está conectada al equipo. Alguien tiene
+# que ir a enchufarla, y eso vale la pena saberlo aunque no haya paciente —
+# mejor enterarse a las 3 AM que cuando llega el primero.
 SENSOR_DESCONECTADO = {
-    "electrodo_suelto",                                    # ECG
-    "sensor_suelto", "sin_dedo",                           # SpO2
-    "t1_suelto", "t2_suelto", "t1_y_t2_sueltos",           # temperatura
-    "manguito_flojo",                                      # NIBP
+    "sensor_desconectado",                                       # SpO2
+    "t1_desconectado", "t2_desconectado", "t1_y_t2_desconectados",  # temperatura
+}
+
+# Estados que sólo dicen que no hay nadie puesto. Con el tótem ocioso son LO
+# NORMAL y alertar por ellos sería ruido permanente:
+#
+# - `sin_paciente` (SpO2 "no finger") es el estado del 99 % del día.
+# - `electrodo_suelto` es lo mismo para el ECG: el lead-off se detecta por
+#   impedancia entre electrodos, así que sin nadie conectado da siempre
+#   positivo. NO distingue "cable desenchufado del equipo" de "nadie puesto",
+#   por eso no puede usarse como falla.
+#
+# Se informan igual en el objeto —sirven para saber si hay una medición en
+# curso— pero no mueven el estado general.
+SENSOR_SIN_PACIENTE = {
+    "sin_paciente", "electrodo_suelto", "senal_debil",
+    "buscando_pulso", "busqueda_demasiado_larga",
 }
 
 
