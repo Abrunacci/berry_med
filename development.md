@@ -64,6 +64,8 @@ python tools/mock_api_server.py
 ```
 
 Set `API_URL` in credentials to `http://127.0.0.1:8080/vitals` (use `127.0.0.1`, not `0.0.0.0`).
+It is a **base** URL: the app posts to `{API_URL}/{TOTEM_ID}/metrics`. The mock server
+accepts any path, so no extra setup is needed.
 
 ---
 
@@ -311,6 +313,10 @@ En `credentials.json`, temporalmente:
 
 Usá `127.0.0.1`, no `0.0.0.0` (el cliente no puede conectar a `0.0.0.0`).
 
+`API_URL` es la **base**: la app postea a `{API_URL}/{TOTEM_ID}/metrics`, o sea
+`http://127.0.0.1:8080/vitals/<totem>/metrics`. El mock acepta cualquier ruta,
+así que no hay nada más que configurar.
+
 Terminal 2 — monitor:
 
 ```powershell
@@ -336,6 +342,55 @@ Dispará `start-monitoring` desde Pusher; en la terminal del mock deberías ver 
 
 ---
 
+## Tests
+
+```bash
+poetry install          # instala pytest (grupo dev)
+poetry run pytest
+```
+
+Corren en cualquier lado —WSL, Linux, Windows— y **no necesitan el Berry**. La
+entrada del parser (`add_data()`) es una función pura de bytes a estado, así
+que casi todo el pipeline se prueba alimentándolo con tramas.
+
+Hay dos fuentes de bytes, y hacen falta las dos:
+
+| | De dónde salen | Qué prueban |
+|---|---|---|
+| **Tramas sintéticas** (`tests/tramas.py`) | Construidas acá, según el manual | Qué hace el código ante un byte dado. Permiten armar el caso raro: un checksum roto, una trama partida al medio, un SpO2 en error. |
+| **Capturas reales** (`tests/capturas/*.bin`) | Grabadas del equipo | Que el equipo mande los bytes que creemos. Si nuestra lectura del manual estuviera mal, sólo esto se entera. |
+
+Sin capturas, esos tests saltean solos y el resto corre igual.
+
+### Grabar las capturas (esto sí necesita el equipo)
+
+En Windows, con el Berry enchufado:
+
+```bash
+poetry run python tools\capturar_escenarios.py --puerto COM3
+```
+
+Te va pidiendo una maniobra por escenario —poner el dedo, desenchufar la sonda
+de SpO2, despegar un electrodo— graba, y **te dice en el momento si la captura
+sirve**: parsea los bytes con el parser de producción y verifica el estado que
+ese escenario esperaba. Si salió mal, ofrece repetirla ahí mismo. Son unos 6
+minutos en total.
+
+```bash
+poetry run python tools\capturar_escenarios.py --listar
+poetry run python tools\capturar_escenarios.py --puerto COM3 --solo ocioso
+```
+
+Los `.bin` y su `manifest.json` van versionados: grabarlos cuesta una sesión con
+el hardware y son el registro de qué manda el equipo en cada estado.
+
+### Lo que los tests no cubren
+
+`_connect_sync()`: abrir el puerto, mandar los enables y esperar respuesta es
+I/O contra el equipo, y un `.bin` no dice si el Berry engancha. Después de tocar
+`serial_manager.py`, esa parte se sigue probando enchufando: alcanza con ver
+`Datos OK tras Xs (N bytes)` en el log de arranque.
+
 ## Project Structure
 
 - `app.py` – main monitoring loop, Pusher events, HTTP POST
@@ -345,6 +400,10 @@ Dispará `start-monitoring` desde Pusher; en la terminal del mock deberías ver 
 - `src/` – device interfaces, parser, communication handlers
 - `tools/mock_api_server.py` – local HTTP server for payload inspection
 - `pyproject.toml` – dependencies and build config (Poetry)
+- `tests/` – set de tests (pytest); `tests/escenarios.py` define qué se captura
+- `tools/capturar_escenarios.py` – graba las capturas del equipo para los tests
+- `docs/backend.md` – qué se manda al backend y a qué endpoints
+- `docs/configuracion.md` – todas las claves de configuración
 - `berry-monitor.spec` / `berry-configure.spec` – PyInstaller build specs
 
 ---

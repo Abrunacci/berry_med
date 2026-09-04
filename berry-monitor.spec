@@ -6,7 +6,11 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=['asyncio', 'bleak', 'pysher', 'src.data_parser', 'src.bluetooth_manager', 'src.thermometer_reader', 'aiohttp', 'aiohttp.client', 'serial', 'serial.serialwin32', 'serial.tools.list_ports_windows'],
+    # `src` es un namespace package (no tiene __init__.py), así que
+    # PyInstaller no resuelve sus submódulos solo: van todos listados acá.
+    # Si se agrega un módulo a src/, agregarlo también en esta lista o el exe
+    # revienta al arrancar con ModuleNotFoundError.
+    hiddenimports=['asyncio', 'bleak', 'pysher', 'src.data_parser', 'src.bluetooth_manager', 'src.thermometer_reader', 'src.serial_manager', 'src.logging_setup', 'src.health', 'src.pm6750_protocol', 'logging.handlers', 'aiohttp', 'aiohttp.client', 'serial', 'serial.serialwin32', 'serial.tools.list_ports_windows'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

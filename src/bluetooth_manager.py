@@ -1,13 +1,22 @@
 import asyncio
+import time
 from typing import Callable, Optional
 
 from bleak import BleakClient, BleakScanner
 
+from src.pm6750_protocol import (
+    CMD_NIBP,
+    build_command,
+    build_nibp_commands,
+    build_startup_commands,
+)
+
 
 class BMPatientMonitor:
-    def __init__(self, data_parser, status_callback: Callable):
+    def __init__(self, data_parser, status_callback: Callable, device_config=None):
         self.data_parser = data_parser
         self.status_callback = status_callback
+        self.device_config = device_config or {}
         self.client: Optional[BleakClient] = None
         self.device = None
         self.connected = False
@@ -21,6 +30,11 @@ class BMPatientMonitor:
         self.reconnect_interval = 5  # seconds between reconnection attempts
         self.is_device_active = False
         self.last_data_timestamp = 0
+        # monotonic() de la última notificación BLE. Va aparte de
+        # `last_data_timestamp`, que usa el reloj del event loop: el /health se
+        # arma desde otra tarea y necesita un reloj comparable con el del lector
+        # USB. None = todavía nunca llegó nada.
+        self._ultimo_dato = None
 
     async def connect(self) -> bool:
         while True:
@@ -51,6 +65,8 @@ class BMPatientMonitor:
                     self.CHAR_RECEIVE_UUID, self._handle_data
                 )
 
+                await self.start_monitoring()
+
                 self.status_callback("Connected to BerryMed")
                 return True
 
@@ -61,6 +77,32 @@ class BMPatientMonitor:
                 self.connected = False
                 await asyncio.sleep(self.reconnect_interval)
 
+    async def start_monitoring(self):
+        """Configura el módulo y habilita los streams.
+
+        Esta vía antes no mandaba ningún comando: dependía de que el módulo
+        arrancara transmitiendo solo y con la configuración que tuviera guardada.
+        Ahora manda la misma secuencia que la vía USB (`pm6750_protocol`), así
+        ganancia y modo de ECG quedan explícitos en las dos.
+
+        Es best-effort: si falla, se avisa pero no se corta la conexión, porque
+        el equipo puede estar ya transmitiendo por su cuenta.
+        """
+        if not (self.client and self.client.is_connected):
+            return
+        try:
+            for a1, a2 in build_startup_commands(
+                self.device_config, log=self.status_callback
+            ):
+                await self.client.write_gatt_char(
+                    self.CHAR_SEND_UUID, bytearray(build_command(a1, a2))
+                )
+                # El módulo pierde comandos si llegan pegados.
+                await asyncio.sleep(0.05)
+            self.status_callback("Configuración enviada al PM6750")
+        except Exception as e:
+            self.status_callback(f"No se pudo configurar el PM6750: {e}")
+
     async def disconnect(self):
         if self.client and self.client.is_connected:
             await self.client.disconnect()
@@ -69,14 +111,45 @@ class BMPatientMonitor:
 
     async def start_nibp(self):
         if self.client and self.client.is_connected:
-            command = bytearray([0x55, 0xAA, 0x04, 0x02, 0x01, 0xF8])
-            await self.client.write_gatt_char(self.CHAR_SEND_UUID, command)
+            # Modo y presión objetivo van acá, justo antes de arrancar: el
+            # manual pide setearlos inmediatamente antes de cada medición.
+            for a1, a2 in build_nibp_commands(
+                self.device_config, log=self.status_callback
+            ):
+                await self.client.write_gatt_char(
+                    self.CHAR_SEND_UUID, bytearray(build_command(a1, a2))
+                )
+                await asyncio.sleep(0.05)
 
     def _handle_data(self, _, data: bytearray):
         # Update last data timestamp
         self.last_data_timestamp = asyncio.get_event_loop().time()
+        self._ultimo_dato = time.monotonic()
         self.is_device_active = True
         self.data_parser.add_data(data)
+
+    def link_status(self) -> dict:
+        """Estado del enlace con el equipo, para el /health.
+
+        Mismo contrato que `PM6750USBReader.link_status()`, para que el health
+        no tenga que saber por qué transporte está conectado el tótem.
+
+        `connected` sale de `client.is_connected` y no del flag `self.connected`,
+        que lo setea `connect()` y nadie lo baja cuando el enlace se cae solo.
+        """
+        vivo = bool(self.client and self.client.is_connected)
+        if self._ultimo_dato is None:
+            edad = None
+        else:
+            edad = round(time.monotonic() - self._ultimo_dato, 1)
+        return {
+            "transport": "bt",
+            "port": self.DEVICE_NAME,
+            "connected": vivo,
+            "portOpen": vivo,
+            "readerAlive": vivo,
+            "lastFrameSecondsAgo": edad,
+        }
 
     async def check_connection(self):
         """Check if device is still connected and sending valid data"""
@@ -91,6 +164,5 @@ class BMPatientMonitor:
     def send_nibp_command(self):
         """Send NIBP command synchronously"""
         if self.client and self.client.is_connected:
-            command = bytearray([0x55, 0xAA, 0x04, 0x02, 0x01, 0xF8])
-            return command
+            return bytearray(build_command(CMD_NIBP, 0x01))
         return None

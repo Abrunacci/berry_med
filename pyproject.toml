@@ -16,6 +16,20 @@ aiohttp = "^3.11.9"
 pyserial = "^3.5"
 
 
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.0"
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# El parser pide el event loop para poner marca de tiempo a las ondas, y fuera
+# de la app no hay ninguno corriendo. En produccion si lo hay: el warning es un
+# artefacto de testear el parser aislado, que es justamente lo que queremos.
+filterwarnings = [
+    "ignore:There is no current event loop:DeprecationWarning",
+]
+
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
