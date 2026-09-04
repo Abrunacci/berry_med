@@ -85,6 +85,26 @@ distingue un cable desenchufado del equipo de un tótem ocioso.
 `manguito_flojo` es el resultado de una medición que salió mal, no un estado
 permanente del equipo, y sólo aparece si alguien pidió una medición.
 
+### 3.5 No todos los tótems llevan las mismas sondas
+
+Una falla sólo cuenta si esa sonda se usa en **este** tótem. El caso concreto:
+cuando la temperatura se mide con el termómetro USB IR, la sonda de temperatura
+del Berry no se conecta nunca, y el equipo informa `t1_desconectado` en cada
+paquete, de forma permanente. Sin esta condición ese tótem reporta `degraded`
+para siempre — el mismo ruido permanente que el "no finger" del SpO₂, y por la
+misma razón: una alerta que suena siempre no es una alerta.
+
+Se declara en `HEALTH_EXPECTED_SENSORS` (§7). Sólo `spo2` y `temperature` se
+pueden vigilar: son las únicas dos desconexiones que el protocolo transmite
+(§3.4).
+
+El estado de una sonda no vigilada **se sigue publicando**, con
+`expected: false` al lado. No alertar no es lo mismo que ocultar.
+
+Esto no se dedujo leyendo el código: apareció cuando las capturas del equipo
+real mostraron `t1_desconectado` en los cinco escenarios, incluido el que tenía
+un paciente puesto y todo lo demás sano.
+
 ### 3.4 Límite conocido
 
 **Las únicas dos fallas de sensor detectables son SpO₂ y temperatura.** Si
@@ -121,7 +141,8 @@ algo que se pueda agregar después — el protocolo no lo transmite.
       "status": "sin_paciente",
       "secondsAgo": 0.0,
       "stale": false,
-      "kind": "sin_paciente"
+      "kind": "sin_paciente",
+      "expected": true
     },
     "ecg": {
       "status": "electrodo_suelto",
@@ -129,10 +150,12 @@ algo que se pueda agregar después — el protocolo no lo transmite.
       "weakSignal": false,
       "secondsAgo": 0.0,
       "stale": false,
-      "kind": "sin_paciente"
+      "kind": "sin_paciente",
+      "expected": false
     }
   },
   "disconnectedSensors": [],
+  "expectedSensors": ["spo2"],
   "sensorsWithoutPatient": ["ecg", "spo2"],
   "session": { "active": false, "secondsElapsed": null }
 }
@@ -153,7 +176,9 @@ algo que se pueda agregar después — el protocolo no lo transmite.
 | `sensors.<s>.kind` | `falla` \| `sin_paciente` \| `ok` \| `info`. **Es el campo a mirar**: evita conocer las tablas del protocolo. |
 | `sensors.<s>.secondsAgo` | Antigüedad de ese estado. |
 | `sensors.<s>.stale` | `secondsAgo > 30`. Un estado viejo no describe la realidad. |
-| `disconnectedSensors` | Sondas no conectadas al equipo. **Esto sí es una alerta.** |
+| `sensors.<s>.expected` | Si este tótem lleva esa sonda. Con `false`, su desconexión se informa pero **no alerta**. Ver §3.5. |
+| `disconnectedSensors` | Sondas que este tótem usa y no están conectadas. **Esto sí es una alerta.** |
+| `expectedSensors` | Qué sondas se vigilan acá. Permite distinguir "no hay alerta" de "no se está mirando". |
 | `sensorsWithoutPatient` | Conectadas pero sin nadie puesto. Informativo. |
 | `session.active` | Si hay una sesión de medición en curso. |
 
@@ -182,6 +207,7 @@ operación, y no debería disparar la misma alarma que un tótem incomunicado.
 | Paciente puesto, midiendo | `ok` | — |
 | Sonda de SpO₂ desenchufada | `degraded` | `disconnectedSensors: ["spo2"]` |
 | Sonda de temperatura desenchufada | `degraded` | `disconnectedSensors: ["temperature"]` |
+| Sonda de temperatura desenchufada, tótem sin esa sonda | `ok` | `sensors.temperature.expected: false` |
 | Manguito flojo | `ok` | resultado clínico, no falla |
 | Hilo lector muerto | `down` | `readerAlive: false` |
 | Enlace mudo hace 30 s | `down` | `dataFresh: false` con `connected: true` |
@@ -212,8 +238,17 @@ puede tumbar el monitoreo.
 |---|---|---|
 | `HEALTH_ENDPOINT` | `health` | Último tramo de la URL. Cuelga de la misma base y el mismo `TOTEM_ID` que las métricas. |
 | `HEALTH_INTERVAL_SECONDS` | `60` | Cada cuánto se reporta. **`0` desactiva el reporte.** |
+| `HEALTH_EXPECTED_SENSORS` | `spo2,temperature` | Sondas que este tótem lleva, separadas por coma. Sólo la desconexión de éstas mueve `status`. Vacío = ninguna. Ver §3.5. |
 
-Las dos se cargan desde `berry-configure.exe`.
+Las tres se cargan desde `berry-configure.exe`.
+
+> `HEALTH_EXPECTED_SENSORS` ausente equivale a vigilar las dos: un tótem ya
+> instalado no tiene la clave en su `credentials.json` y su comportamiento no
+> cambia al actualizar. El default avisa de más antes que de menos.
+>
+> **Si el tótem mide la temperatura con el termómetro USB, poné `spo2` solo.**
+> Con la sonda del Berry ausente, dejarlo en el default deja el health en
+> `degraded` de forma permanente.
 
 ---
 

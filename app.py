@@ -1,6 +1,5 @@
 import asyncio
 import base64
-import copy
 import os
 import sys
 import time
@@ -100,7 +99,8 @@ class VitalsMonitor:
             self.credentials.get("health_interval_seconds", 60)
         )
         self.health = HealthReporter(
-            str(self.credentials.get("totem_id") or ""), self.data_parser
+            str(self.credentials.get("totem_id") or ""), self.data_parser,
+            self.credentials.get("health_expected_sensors"),
         )
         print(f"[DEBUG] Endpoint de health: {self.health_url} "
               f"(cada {self.health_interval:.0f}s)"
@@ -413,7 +413,10 @@ class VitalsMonitor:
                         )
                         continue
 
-                    data = copy.deepcopy(self.data_parser.get_current_data())
+                    # `tomar_payload()` y no una copia: se lleva las ondas y
+                    # deja la ventana vacía, así lo que llegue después va al
+                    # POST siguiente en vez de perderse. Ver su docstring.
+                    data = self.data_parser.tomar_payload()
                     self._apply_thermometer_temperature(data)
                     if not self._is_valid_data(data):
                         await asyncio.sleep(1)
@@ -464,7 +467,7 @@ class VitalsMonitor:
     def _summarize(data):
         """Resumen del payload para el log.
 
-        Se envían 7 derivaciones de ECG a ~251 Hz (~1.750 valores/seg), así que
+        Se envían 7 derivaciones de ECG a 250 Hz (1.750 valores/seg), así que
         volcar el payload entero al stdout cada segundo lo vuelve ilegible. Se
         loguean los signos vitales y el largo de cada onda; el payload que se
         manda a la API no cambia.

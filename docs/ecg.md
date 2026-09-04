@@ -272,16 +272,79 @@ queda mudo (0 bytes).
 
 ---
 
+## 9b. Cuántas muestras llegan al backend
+
+**250 por derivación por segundo**, y desde esta versión llegan todas.
+
+La frecuencia está medida sobre las capturas y no tomada del manual: la relación
+entre tipos de paquete da **5,00 paquetes de ECG por cada uno de SpO₂**, igual en
+las cuatro capturas. Con SpO₂ a 50 Hz, el ECG va a 250 Hz — coincide con el
+manual y con los 250,7 medidos antes.
+
+### El bug que había
+
+`data["ecg"]` se vaciaba en cada cambio de segundo del reloj, y el que posteaba
+sólo hacía una copia sin consumir. Como el POST sale cada `sleep(1)` **más** lo
+que tarde la request, nunca queda alineado con esa frontera: cada POST se
+llevaba lo acumulado desde el último borrado y el resto se perdía.
+
+Medido con el reloj real de asyncio, alimentando el parser a 250 Hz:
+
+```
+muestras por derivación en cada POST: [87, 120, 120, 123, 123, 123]
+recibidas: 1473 | enviadas: 696 | cobertura: 47%
+```
+
+Y barriendo la fase se ve el mecanismo completo: con el POST cayendo a 0,1 s del
+cambio de segundo iban 26 muestras; a 0,9 s iban 226. Como la fase deriva, el
+número ciclaba: `[125, 139, 151, … 238, 1, 13, 26, …]`.
+
+Iba en contra del requisito que motivó `tools/ecg_audit.py`: *si el equipo manda
+una muestra, se manda*.
+
+### El arreglo
+
+`BMDataParser.tomar_payload()` entrega las ondas **y las vacía**, y `send_data()`
+la usa en vez de copiar. La ventana ya no depende del reloj: se llena entre dos
+POST y se vacía cuando uno se la lleva.
+
+```
+muestras por derivación en cada POST: [87, 246, 246, 246, 245, 243]
+recibidas: 1473 | enviadas: 1313 | sin postear aún: 159 | cobertura: 100%
+```
+
+Lo cubre `test_no_se_pierde_ninguna_muestra_entre_tomas`, que cuenta de punta a
+punta que todo lo que entra sale exactamente una vez.
+
+---
+
 ## 10. Pendientes
 
-- **⚠️ La captura de referencia está saturada.** El **98,1 %** de los paquetes
-  `0x01` tienen al menos un canal pegado al tope (≤2 o ≥247): quedaron sólo 142
-  muestras limpias de 7.505. Alcanzó para confirmar el orden de las
-  derivaciones, pero **no sirve para evaluar calidad de señal**. Dato clave: en
-  esa misma captura el equipo reportaba `leadOff: False` y `gain: x1`, o sea que
-  **no era electrodo suelto sino el amplificador saturando**. Conviene repetir
-  con `ECG_GAIN=x0.5` (o `x0.25`) y electrodos bien puestos (guía AHA: RA
-  blanco, LA negro, RL verde, LL rojo, V marrón).
+- **⚠️ El ECG satura con la ganancia actual.** Medido dos veces, con electrodos
+  bien puestos y `leadOff: False` / `weakSignal: False` las dos: **no es
+  electrodo suelto, es el amplificador saturando**.
+
+  | Captura | Config | Muestras limpias |
+  |---|---|---|
+  | Referencia original | `gain: x1` | 142 de 7.505 (**1,9 %**) |
+  | `tests/capturas/normal.bin` (2026-09-04) | `gain: x1`, `mode: diagnostico` | 537 de 2.500 (**21 %**) |
+
+  Alcanza para confirmar el orden de las derivaciones —y con las 537 muestras
+  limpias se verifica ahora en cada corrida de los tests— pero significa que
+  **la onda que el tótem postea está recortada** las tres cuartas partes del
+  tiempo. Conviene bajar a `ECG_GAIN=x0.5` (o `x0.25`) y regrabar la captura
+  `normal`. Electrodos según la guía AHA: RA blanco, LA negro, RL verde, LL
+  rojo, V marrón.
+
+  `tools/capturar_escenarios.py` avisa en el momento si una captura de ECG sale
+  saturada, y `tests/test_capturas.py` deja el porcentaje medido en cada corrida.
+
+- **Línea de base en 128, confirmado por medición.** Sobre las muestras sin
+  saturar de `normal.bin`, `II - I - III` da una constante de **-127,5 con
+  desvío 1,09** — o sea `II = I + III - 128`, la identidad de Einthoven sobre la
+  señal centrada, dentro del error de cuantización. Goldberger da igual de
+  ajustado (desvíos de 0,40 a 0,92). Cualquier consumidor de `data["ecg"]` tiene
+  que restar 128 antes de tratar los valores como amplitudes.
 
 - **Decidir el modo de ECG según el uso.** Hoy queda en `monitor` (0,5–75 Hz),
   que es lo que el equipo usa de fábrica. Si el uso es diagnóstico, poner

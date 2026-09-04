@@ -39,6 +39,14 @@ medición.
 La clasificación vive en `pm6750_protocol.SENSOR_DESCONECTADO` /
 `SENSOR_SIN_PACIENTE` y se publica por sensor en el campo `kind`, para que el
 backend no tenga que conocer las tablas del protocolo.
+
+Y hay una segunda condición para que una falla cuente: que ese sensor se use en
+ESTE tótem. No todos tienen la misma sonda —el de temperatura del Berry no se
+conecta cuando la temperatura se mide con el termómetro USB IR aparte— y el
+equipo informa su ausencia igual, de forma permanente. Sin la lista de sensores
+esperados, un tótem así reporta `degraded` para siempre: el mismo ruido
+permanente que ya nos había pasado con el "no finger" del SpO2, y por la misma
+razón. La lista sale de `HEALTH_EXPECTED_SENSORS`.
 """
 
 import time
@@ -54,6 +62,11 @@ FRAME_FRESCO_SEG = 5.0
 # Más generoso que el del enlace: la temperatura y la presión no llegan continuo.
 SENSOR_FRESCO_SEG = 30.0
 
+# Sensores cuya desconexión el equipo sabe informar. Es el máximo que se puede
+# vigilar: del ECG y del NIBP no hay señal de "cable desenchufado" en el
+# protocolo, así que no tiene sentido esperarlos. Ver docs/health.md.
+SENSORES_VIGILABLES = ("spo2", "temperature")
+
 
 class HealthReporter:
     """Junta el estado de las partes y arma el objeto que se postea.
@@ -64,9 +77,15 @@ class HealthReporter:
     así que un lector nunca ve una entrada a medio escribir.
     """
 
-    def __init__(self, totem_id: str, parser):
+    def __init__(self, totem_id: str, parser, sensores_esperados=None):
         self.totem_id = totem_id
         self.parser = parser
+        # Qué sondas tiene puestas este tótem. Sin lista, se esperan todas las
+        # que el equipo sabe reportar: es el comportamiento que ya había, y
+        # falla del lado de avisar de más antes que de menos.
+        self.sensores_esperados = frozenset(
+            SENSORES_VIGILABLES if sensores_esperados is None else sensores_esperados
+        )
         self._arranque = time.monotonic()
 
     # --- armado del objeto --------------------------------------------------
@@ -82,6 +101,10 @@ class HealthReporter:
             salida[nombre]["secondsAgo"] = edad
             salida[nombre]["stale"] = edad > SENSOR_FRESCO_SEG
             salida[nombre]["kind"] = self._clasificar(salida[nombre]["status"])
+            # Si este tótem no tiene esa sonda, su estado se publica igual pero
+            # no puede mover el estado general. El backend lo lee de acá sin
+            # tener que conocer la configuración del tótem.
+            salida[nombre]["expected"] = nombre in self.sensores_esperados
         return salida
 
     @staticmethod
@@ -145,7 +168,7 @@ class HealthReporter:
         # horas y ya no describe la realidad.
         desconectados = sorted(
             n for n, d in sensores.items()
-            if d["kind"] == "falla" and not d["stale"]
+            if d["kind"] == "falla" and not d["stale"] and d["expected"]
         )
         sin_paciente = sorted(
             n for n, d in sensores.items()
@@ -166,8 +189,13 @@ class HealthReporter:
             "device": dict(device, dataFresh=device_ok),
             "pusher": pusher_st,
             "sensors": sensores,
-            # Sondas que no están conectadas al equipo: esto sí es una alerta.
+            # Sondas que este tótem usa y no están conectadas: esto sí es una
+            # alerta. Una sonda que el tótem no usa no entra acá aunque el
+            # equipo la reporte desconectada — ver `expected` en cada sensor.
             "disconnectedSensors": desconectados,
+            # Qué sondas se vigilan en este tótem, para que el backend pueda
+            # distinguir "no hay alerta" de "no se está mirando".
+            "expectedSensors": sorted(self.sensores_esperados),
             # Sensores conectados pero sin nadie puesto. Va aparte y a título
             # informativo: es el estado normal de un tótem esperando paciente.
             "sensorsWithoutPatient": sin_paciente,

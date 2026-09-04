@@ -120,6 +120,14 @@ FIELDS = (
           kind="int", default="60",
           help="Cada cuánto se reporta el estado del tótem. 0 desactiva el "
                "reporte."),
+    Field("HEALTH_EXPECTED_SENSORS", "Sondas que tiene este tótem", "API",
+          default="spo2,temperature",
+          help="Separadas por coma. Sólo la desconexión de éstas pone el "
+               "estado en 'degraded'. Si el tótem mide la temperatura con el "
+               "termómetro USB y no tiene la sonda del Berry, dejá sólo "
+               "'spo2': el equipo la informa desconectada todo el tiempo y si "
+               "no, el health queda en rojo para siempre. Vacío = no vigilar "
+               "ninguna."),
 )
 
 BY_KEY = {f.key: f for f in FIELDS}

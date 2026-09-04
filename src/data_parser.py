@@ -107,6 +107,9 @@ class BMDataParser:
         }
         # Tope por ventana de 1 s. El ECG llega a ~1756 muestras/s (7 por
         # paquete × ~251 paquetes/s), así que 25 recortaba >98% de la señal.
+        # Tope de una ventana sin que nadie la consuma: con el ECG a 250 Hz son
+        # 10 segundos. Sólo se alcanza sin sesión activa, que es cuando nadie
+        # postea; al arrancar una, `reset_data()` limpia todo.
         self.max_waveform_points = 2500
         # Tope de picos por ventana de 1 s. A 250 lpm serían ~4; 100 es un
         # techo defensivo para que un stream corrupto no infle el payload.
@@ -176,6 +179,12 @@ class BMDataParser:
                 self.raw_buffer = self.raw_buffer[-1:]
 
     def get_current_data(self):
+        """El estado actual, SIN consumirlo. Para inspeccionar, no para postear.
+
+        Lo que se postea sale de `tomar_payload()`, que además vacía las ondas.
+        Usar ésta para armar un POST es el bug que se arregló: las muestras se
+        quedan en la ventana y se pisan con las que llegan después.
+        """
         return self.data
 
     # ---------- helpers -----------------------------------------------------
@@ -231,17 +240,48 @@ class BMDataParser:
         parejas: se agrega una muestra a cada una por paquete)."""
         return len(self.data["ecg"][self.ECG_LEADS[0]])
 
-    def _roll_ecg_window(self, current_time: int) -> None:
-        """Arranca una ventana nueva de ECG si cambió el segundo.
+    def tomar_payload(self) -> dict:
+        """Devuelve lo que hay para postear y arranca una ventana nueva.
 
-        Las derivaciones (`ecg`) y los picos (`ecgPeaks`) comparten ventana: los
-        picos se indexan contra la onda, así que tienen que vaciarse juntos o
-        los índices apuntarían a la ventana anterior.
+        Las ondas se **entregan y se vacían**: lo que sale de acá no vuelve a
+        salir, y lo que entra después va a la ventana siguiente. Los signos
+        vitales y `ecgInfo` no, que son estado y se siguen publicando igual
+        aunque no cambien.
+
+        Antes las ondas se vaciaban por reloj —una ventana nueva en cada cambio
+        de segundo— y el que posteaba sólo hacía una copia, sin consumir. Como
+        el POST sale cada `sleep(1)` MÁS lo que tarde la request, nunca quedaba
+        alineado con esa frontera: cada POST se llevaba el pedazo acumulado
+        desde el último borrado y el resto se perdía. Medido con reloj real:
+        llegaban ~120 de las 250 muestras por derivación y la cobertura era del
+        **47 %**, con el número ciclando entre 1 y 250 a medida que la fase
+        derivaba. El requisito es el contrario — si el equipo manda una muestra,
+        se manda (ver `tools/ecg_audit.py`).
+
+        Sobre hilos: el lector llena las listas desde su hilo y esto las cambia
+        desde el event loop. Cada lista se reemplaza con una sola asignación,
+        así que una muestra que entre en el medio cae en la lista vieja —la que
+        se está entregando— y viaja igual. Los picos se reemplazan antes que la
+        onda a propósito: al revés, un pico que entrara justo en el medio
+        quedaría indexado contra una ventana que ya se fue.
         """
-        if current_time > self._wave_last["ecg"]:
-            self.data["ecg"] = {lead: [] for lead in self.ECG_LEADS}
-            self.data["ecgPeaks"] = []
-            self._wave_last["ecg"] = current_time
+        picos = self.data["ecgPeaks"]
+        self.data["ecgPeaks"] = []
+        ecg = self.data["ecg"]
+        self.data["ecg"] = {lead: [] for lead in self.ECG_LEADS}
+        spo2 = self.data["spo2"]
+        self.data["spo2"] = []
+        resp = self.data["resp"]
+        self.data["resp"] = []
+
+        return {
+            "spo2": spo2,
+            "ecg": ecg,
+            "ecgPeaks": picos,
+            "ecgInfo": dict(self.data["ecgInfo"]),
+            "resp": resp,
+            "vitalSigns": dict(self.data["vitalSigns"]),
+        }
 
     # ---------- main package handler ---------------------------------------
     def _parse_package(self, package: list) -> None:
@@ -266,9 +306,6 @@ class BMDataParser:
                 current_time = int(time.time())
 
             if callback_name == "on_spo2_waveform_received":
-                if current_time > self._wave_last["spo2"]:
-                    self.data["spo2"] = []
-                    self._wave_last["spo2"] = current_time
                 if len(self.data["spo2"]) < self.max_waveform_points:
                     self.data["spo2"].append(package[4])
                 callback(package[4])
@@ -276,9 +313,7 @@ class BMDataParser:
             elif callback_name == "on_ecg_waveform_received":
                 # OJO: los 7 bytes del paquete NO son 7 muestras temporales,
                 # son 7 DERIVACIONES (I, II, III, aVR, aVL, aVF, V) del mismo
-                # instante, cada una muestreada a ~251 Hz. Ver docs/ecg.md.
-                self._roll_ecg_window(current_time)
-
+                # instante, cada una muestreada a 250 Hz. Ver docs/ecg.md.
                 # Datos útiles: desde el byte 4 hasta antes del checksum.
                 # Normalmente son 7; si llegaran menos, se guardan los que haya.
                 samples = package[4:-1]
@@ -288,9 +323,6 @@ class BMDataParser:
                 callback(package[4])
 
             elif callback_name == "on_resp_waveform_received":
-                if current_time > self._wave_last["resp"]:
-                    self.data["resp"] = []
-                    self._wave_last["resp"] = current_time
                 if len(self.data["resp"]) < self.max_waveform_points:
                     self.data["resp"].append(package[4])
                 callback(package[4])
@@ -352,7 +384,6 @@ class BMDataParser:
                 # Se guarda la posición del latido DENTRO de la ventana actual
                 # de ECG, para poder marcarlo sobre la onda que va en el mismo
                 # POST. `ms` es ese índice llevado a tiempo con ECG_SAMPLE_RATE_HZ.
-                self._roll_ecg_window(current_time)
                 if len(self.data["ecgPeaks"]) < self.max_peaks_per_window:
                     sample = self._ecg_window_len()
                     self.data["ecgPeaks"].append({

@@ -1,0 +1,99 @@
+{
+  "normal": {
+    "id": "normal",
+    "titulo": "Todo normal, con paciente",
+    "grabada": "2026-09-04T10:03:32",
+    "segundos": 20,
+    "bytes": 87040,
+    "sensores": {
+      "spo2": "ok",
+      "temperature": "ok",
+      "ecg": "ok"
+    },
+    "muestrasEcg": 11795,
+    "verificacionOk": true,
+    "problemas": [],
+    "advertencias": []
+  },
+  "ocioso": {
+    "id": "ocioso",
+    "titulo": "Tótem ocioso (todo enchufado, nadie puesto)",
+    "grabada": "2026-09-04T10:04:30",
+    "segundos": 15,
+    "bytes": 67584,
+    "sensores": {
+      "ecg": "electrodo_suelto",
+      "spo2": "sin_paciente",
+      "temperature": "ok"
+    },
+    "muestrasEcg": 17500,
+    "verificacionOk": true,
+    "problemas": [],
+    "advertencias": []
+  },
+  "spo2_sonda_desconectada": {
+    "id": "spo2_sonda_desconectada",
+    "titulo": "Sonda de SpO2 desenchufada del equipo",
+    "grabada": "2026-09-04T10:05:13",
+    "segundos": 15,
+    "bytes": 67584,
+    "sensores": {
+      "ecg": "electrodo_suelto",
+      "spo2": "sensor_desconectado",
+      "temperature": "ok"
+    },
+    "muestrasEcg": 17500,
+    "verificacionOk": true,
+    "problemas": [],
+    "advertencias": []
+  },
+  "ecg_electrodo_suelto": {
+    "id": "ecg_electrodo_suelto",
+    "titulo": "Electrodo de ECG despegado",
+    "grabada": "2026-09-04T10:06:22",
+    "segundos": 15,
+    "bytes": 69120,
+    "sensores": {
+      "ecg": "electrodo_suelto",
+      "spo2": "sin_paciente",
+      "temperature": "ok"
+    },
+    "muestrasEcg": 17500,
+    "verificacionOk": true,
+    "problemas": [],
+    "advertencias": []
+  },
+  "temp_sonda_desconectada": {
+    "id": "temp_sonda_desconectada",
+    "titulo": "Sonda de temperatura desenchufada",
+    "grabada": "2026-09-04T10:06:57",
+    "segundos": 15,
+    "bytes": 68608,
+    "sensores": {
+      "ecg": "electrodo_suelto",
+      "spo2": "sin_paciente",
+      "temperature": "t1_desconectado"
+    },
+    "muestrasEcg": 17500,
+    "verificacionOk": true,
+    "problemas": [],
+    "advertencias": []
+  },
+  "nibp_medicion": {
+    "id": "nibp_medicion",
+    "titulo": "Medición de presión completa",
+    "grabada": "2026-09-04T10:08:02",
+    "segundos": 90,
+    "bytes": 146432,
+    "sensores": {
+      "spo2": "sin_paciente",
+      "temperature": "ok",
+      "ecg": "electrodo_suelto",
+      "nibp": "terminado"
+    },
+    "muestrasEcg": 17500,
+    "verificacionOk": true,
+    "problemas": [],
+    "advertencias": []
+  }
+}

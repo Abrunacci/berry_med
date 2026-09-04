@@ -87,6 +87,17 @@ See [About the SSL Certificate](#about-the-ssl-certificate) for instructions.
 
 ---
 
+## 📚 Documentación
+
+| Documento | Para qué |
+|---|---|
+| [`docs/backend.md`](docs/backend.md) | **Qué manda el tótem al backend**: endpoints, autenticación, los dos payloads con ejemplos reales, y los eventos de Pusher que escucha. Si lo vas a mandar al equipo de backend, la [§0](docs/backend.md#0-qué-cambia-para-el-backend) es el resumen de qué tienen que cambiar. |
+| [`docs/configuracion.md`](docs/configuracion.md) | **Todas las claves de configuración**, qué hace cada una y cómo setearlas. |
+| [`docs/health.md`](docs/health.md) | El contrato del `/health` en detalle: qué se mide y cómo se decide `ok`/`degraded`/`down`. |
+| [`docs/ecg.md`](docs/ecg.md) | Las 7 derivaciones, el muestreo y la línea de base. |
+| [`docs/protocolo_berry.md`](docs/protocolo_berry.md) | El protocolo del PM6750, aguas arriba de todo. |
+| [`development.md`](development.md) | Build, tests y capturas del equipo. |
+
 ## 🧯 Troubleshooting
 
 - Make sure your BerryMed device is turned on and Bluetooth is enabled (if using BT mode).
