@@ -318,48 +318,6 @@ def read_status():
         kernel32.CloseHandle(handle)
 
 
-RESTORE_INTENTOS = 5
-RESTORE_BACKOFF_SEC = 0.5
-
-
-def restore_power(relay_number=1, intentos=RESTORE_INTENTOS):
-    """Devuelve los 12 V al dispositivo y verifica que hayan vuelto.
-
-    Es la única operación de este módulo de la que no nos podemos rendir a la
-    primera: mientras el relay siga en ON el PM6750 está sin alimentación, y
-    del otro lado hay un paciente monitoreado. Por eso se reintenta, y por eso
-    se confirma leyendo el estado de la placa en vez de confiar en que
-    `HidD_SetFeature` no devolvió error — el comando puede aceptarse sin que el
-    relay conmute.
-
-    Devuelve True sólo si la placa confirma el relay en OFF.
-    """
-    ultimo = None
-
-    for intento in range(1, intentos + 1):
-        try:
-            set_relay(relay_number, False)
-            estado = read_status()
-            energizado = estado["relay2"] if relay_number == 2 else estado["relay1"]
-            if not energizado:
-                return True
-            ultimo = RuntimeError(
-                f"la placa reporta el relay {relay_number} todavía en ON"
-            )
-        except Exception as e:
-            ultimo = e
-
-        print(f"[RELAY] Intento {intento}/{intentos} de restaurar 12 V falló: "
-              f"{type(ultimo).__name__}: {ultimo}")
-
-        if intento < intentos:
-            time.sleep(RESTORE_BACKOFF_SEC)
-
-    print(f"[RELAY] CRÍTICO: no se pudieron restaurar los 12 V del relay "
-          f"{relay_number}. El dispositivo puede haber quedado sin alimentación.")
-    return False
-
-
 def restart_device(relay_number=1, seconds=5):
     """
     Para dispositivo conectado entre COM y NC:
@@ -374,18 +332,10 @@ def restart_device(relay_number=1, seconds=5):
         print(f"Esperando {seconds} segundos...")
         time.sleep(seconds)
     finally:
-        # De acá no se sale sin intentar todo lo posible por devolver los 12 V,
-        # incluso si un Ctrl+C interrumpió la espera.
+        # Muy importante: aunque Ctrl+C interrumpa la espera,
+        # intentamos devolver el relay a OFF para cerrar NC.
         print(f"Restaurando 12 V: relay {relay_number} OFF")
-        restaurado = restore_power(relay_number)
-
-    # Si el corte quedó sin restaurar, el llamador tiene que enterarse: dar
-    # `restart_device` por exitoso acá dejaría al equipo sin energía y a nadie
-    # buscándolo.
-    if not restaurado:
-        raise RuntimeError(
-            f"No se pudo restaurar la alimentación del relay {relay_number}"
-        )
+        set_relay(relay_number, False)
 
     print("Ciclo terminado.")
 

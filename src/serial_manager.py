@@ -1,4 +1,4 @@
-import atexit, serial, threading, time, asyncio
+import serial, threading, time, asyncio
 
 from src.pm6750_protocol import (
     CMD_NIBP,
@@ -30,47 +30,6 @@ WATCHDOG_RECONNECT_RETRY_SEC = 5.0
 WATCHDOG_USB_RECONNECT_RETRY_SEC = 2.0
 
 
-def _relay_estado_seguro(momento: str) -> None:
-    """Fuerza el relay del PM a OFF, o sea 12 V presentes.
-
-    El relay queda latcheado en la placa: sobrevive a que se muera el proceso.
-    Si BerryMonitor cae entre el corte y la restauración —taskkill, un crash,
-    un update, el operador cerrando la ventana— el PM6750 queda sin
-    alimentación, y en el arranque siguiente el COM no existe, así que
-    `_connect_sync()` corta en el `serial.Serial()` y no llega nunca a la rama
-    que accionaría el relay. Sin esto el equipo queda muerto hasta que alguien
-    lo desenchufa a mano.
-
-    Restaurar alimentación es siempre seguro, así que esto corre incondicional
-    al arrancar. El `atexit` cubre las salidas ordenadas; las que no lo son
-    (taskkill /F, corte de luz de la PC) las cubre el arranque siguiente.
-    """
-    try:
-        from src.usbrelay import read_status, restore_power
-        # Sondear primero: si no hay placa esto corta acá, en vez de meterse en
-        # los reintentos de `restore_power` y demorar el arranque.
-        read_status()
-    except Exception:
-        return
-
-    if restore_power(WATCHDOG_RELAY):
-        print(f"[RELAY] Estado seguro al {momento}: relay {WATCHDOG_RELAY} "
-              f"OFF (12 V presentes)")
-
-
-_estado_seguro_registrado = False
-
-
-def _registrar_estado_seguro() -> None:
-    """Aplica el estado seguro al arrancar y lo deja agendado para la salida."""
-    global _estado_seguro_registrado
-    if _estado_seguro_registrado:
-        return
-    _estado_seguro_registrado = True
-    _relay_estado_seguro("arrancar")
-    atexit.register(_relay_estado_seguro, "salir")
-
-
 class PM6750USBReader:
     """
     Lector PM-6750 vía USB.
@@ -96,15 +55,9 @@ class PM6750USBReader:
         # de vida real del enlace — que `connect()` haya dado True sólo dice
         # que en algún momento hubo datos, no que siga habiéndolos.
         self._ultimo_dato = None
-        # `_run` no alcanza para saber si hay que abandonar una recuperación:
-        # `_abort_connection()` lo baja en cada power-cycle, que es justo lo que
-        # el watchdog hace antes de reintentar. Esta bandera la levanta sólo
-        # `stop_monitoring()` y la baja sólo un arranque pedido por la app.
-        self._stop_pedido = False
         self.parser.register_callback(
             "on_nibp_params_received", self._nibp_done
         )
-        _registrar_estado_seguro()
 
     def reset_state(self):
         """Limpia por completo el estado de NIBP y timeouts.
@@ -147,7 +100,6 @@ class PM6750USBReader:
     # ---------- API pública -----------------------------------------------
     async def connect(self) -> bool:
         """Abre el puerto y arranca la lectura (async para la app)."""
-        self._stop_pedido = False
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._connect_sync)
 
@@ -177,19 +129,12 @@ class PM6750USBReader:
 
     def start_monitoring(self):
         # self.parser.reset_data()
-        self._stop_pedido = False
         if not (self.ser and self.ser.is_open):
             print("[USB] Puerto no abierto"); return
         self._send_enables()
         self._start_reader()
 
     def stop_monitoring(self):
-        # Antes que nada: cortar cualquier recuperación del watchdog en curso.
-        # El `join(timeout=1)` de abajo se rinde al segundo, y sin esta bandera
-        # el hilo seguiría power-cycleando el equipo y, al reconectar, llamaría
-        # a `_start_reader()` —que vuelve a poner `_run=True`— resucitando un
-        # lector que la app acaba de detener.
-        self._stop_pedido = True
         self._run = False
         self.nibp_running = False
         if self._t:
@@ -339,61 +284,25 @@ class PM6750USBReader:
 
     def _watchdog_recover(self) -> bool:
         """Recuperación cuando el PM ya estaba funcionando y queda mudo."""
-        sin_alimentacion = False
-
         if not self._power_cycle_pm(
             f"PM6750 sin datos durante {WATCHDOG_SILENCE_SEC:.0f}s"
         ):
-            if self.ser is not None:
-                # No se llegó a tocar el puerto (típicamente: no hay placa de
-                # relay). El enlace sigue como estaba, así que se devuelve el
-                # control a `_loop`, que reintenta con su propia cadencia.
-                return False
-
-            # El power-cycle quedó a medias: se cortaron los 12 V y no se
-            # pudieron restaurar, y `_abort_connection()` ya cerró el puerto.
-            # Acá NO se puede devolver el control: `_loop` vería `_run=False`,
-            # terminaría el hilo, y `app.py` se quedaría en su `while True`
-            # para siempre con el equipo apagado y nadie buscándolo.
-            sin_alimentacion = True
-            print("[WATCHDOG] Power-cycle incompleto; se insiste con la "
-                  "restauración y la reconexión")
+            return False
 
         intento = 0
-        while not self._stop_pedido:
+        while True:
             intento += 1
             print(f"[WATCHDOG] Intento #{intento} de recuperar {self.port}")
-
-            if sin_alimentacion:
-                # Mientras el relay siga en ON no hay COM que abrir: insistir
-                # con los 12 V es la precondición de todo lo demás.
-                try:
-                    from src.usbrelay import restore_power
-                    if restore_power(WATCHDOG_RELAY):
-                        print("[WATCHDOG] Alimentación del PM6750 restaurada")
-                        sin_alimentacion = False
-                except Exception as e:
-                    print(f"[WATCHDOG] Error restaurando alimentación: "
-                          f"{type(e).__name__}: {e}")
-
             try:
                 # No permitir que _connect_sync() dispare OTRO power-cycle
                 # desde esta recuperación. Así evitamos recursión y ciclos de
                 # relay encadenados.
                 if self._connect_sync(allow_relay_reset=False):
-                    if self._stop_pedido:
-                        # Pararon la app mientras abríamos el puerto: soltar lo
-                        # recién abierto en vez de dejar un lector huérfano.
-                        self._abort_connection()
-                        break
                     print(f"[WATCHDOG] PM6750 recuperado en {self.port}")
                     return True
             except Exception as e:
                 print(f"[WATCHDOG] Error de reconexión: {type(e).__name__}: {e}")
             time.sleep(WATCHDOG_RECONNECT_RETRY_SEC)
-
-        print("[WATCHDOG] Recuperación abandonada: se pidió detener la lectura")
-        return False
 
     def _watchdog_reconnect_usb(self) -> bool:
         """Recupera una caída física/lógica del VCOM sin accionar Relay2.
@@ -421,14 +330,11 @@ class PM6750USBReader:
         self._abort_connection()
 
         intento = 0
-        while not self._stop_pedido:
+        while True:
             intento += 1
             print(f"[WATCHDOG] Intento #{intento} de reconexión USB en {self.port}")
             try:
                 if self._connect_sync(allow_relay_reset=False):
-                    if self._stop_pedido:
-                        self._abort_connection()
-                        break
                     print(f"[WATCHDOG] Conexión USB del PM6750 recuperada en {self.port}")
                     return True
             except Exception as e:
@@ -438,9 +344,6 @@ class PM6750USBReader:
             print(f"[WATCHDOG] {self.port} todavía no disponible o sin datos; "
                   f"nuevo intento en {WATCHDOG_USB_RECONNECT_RETRY_SEC:.0f}s")
             time.sleep(WATCHDOG_USB_RECONNECT_RETRY_SEC)
-
-        print("[WATCHDOG] Reconexión USB abandonada: se pidió detener la lectura")
-        return False
 
     def _connect_sync(self, allow_relay_reset: bool = True) -> bool:
         try:
@@ -604,15 +507,8 @@ class PM6750USBReader:
                         return
                     # Relay ausente/fallo previo: dejar un período completo antes
                     # de volver a intentarlo para no inundar el log.
-                    #
-                    # Sólo se reinicia el anti-spam del log. `_ultimo_dato` NO
-                    # se toca: alimenta `lastFrameSecondsAgo` del /health, y
-                    # pisarlo acá haría que la edad oscilara entre 0 y 20s con
-                    # el equipo muerto hace horas, dando `device_ok` en verde
-                    # parte del tiempo. Justo en el escenario donde el watchdog
-                    # no puede recuperarse solo, el /health tiene que decir la
-                    # verdad para que intervenga una persona.
                     sin_datos_desde = time.monotonic()
+                    self._ultimo_dato = sin_datos_desde
                     aviso_mudo = False
                 continue
 
