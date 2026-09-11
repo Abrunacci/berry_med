@@ -12,7 +12,7 @@ a = Analysis(
     # revienta al arrancar con ModuleNotFoundError.
     # truststore elige su backend por SO con un import condicional: el de
     # Windows va explícito para no depender de que el análisis lo siga.
-    hiddenimports=['asyncio', 'bleak', 'pysher', 'src.data_parser', 'src.bluetooth_manager', 'src.thermometer_reader', 'src.serial_manager', 'src.logging_setup', 'src.health', 'src.pm6750_protocol', 'src.usbrelay', 'src.ssl_context', 'logging.handlers', 'aiohttp', 'aiohttp.client', 'serial', 'serial.serialwin32', 'serial.tools.list_ports_windows', 'truststore', 'truststore._windows'],
+    hiddenimports=['asyncio', 'bleak', 'pysher', 'src.data_parser', 'src.bluetooth_manager', 'src.thermometer_reader', 'src.serial_manager', 'src.logging_setup', 'src.health', 'src.pm6750_protocol', 'src.usbrelay', 'src.ssl_context', 'src.cert_check', 'logging.handlers', 'aiohttp', 'aiohttp.client', 'serial', 'serial.serialwin32', 'serial.tools.list_ports_windows', 'truststore', 'truststore._windows'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

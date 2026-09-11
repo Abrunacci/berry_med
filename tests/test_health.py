@@ -184,7 +184,7 @@ def test_el_objeto_trae_todo_lo_que_el_backend_espera(health, pusher_ok):
     assert set(foto) == {
         "totemId", "status", "uptimeSeconds", "device", "pusher", "sensors",
         "disconnectedSensors", "expectedSensors", "sensorsWithoutPatient",
-        "session",
+        "session", "certificates",
     }
 
 
@@ -282,3 +282,48 @@ def test_se_pueden_apagar_todas_las_alertas_de_sensor(parser, reloj, pusher_ok):
                              session={"active": False, "secondsElapsed": None})
     assert foto["status"] == "ok"
     assert foto["expectedSensors"] == []
+
+
+# --- Certificados del tótem -------------------------------------------------
+
+AVISO_X2_VENCIDO = {
+    "subject": "ISRG Root X2", "issuer": "ISRG Root X1", "stores": ["CA"],
+    "notAfter": "2025-09-15T16:00:00Z", "daysLeft": -361, "expired": True,
+    "sha1": "151682F5218C0A511C28F4060A73B9CA78CE9A53",
+}
+
+
+def test_sin_revision_de_certificados_se_dice_que_no_se_miro(health, pusher_ok):
+    """Los primeros segundos, antes de la primera revisión: el backend tiene
+    que poder distinguir 'no hay avisos' de 'no se revisó'."""
+    certs = snapshot(health, pusher_ok)["certificates"]
+    assert certs["checked"] is False
+    assert certs["warnings"] == []
+    assert certs["error"]
+
+
+def test_un_certificado_vencido_se_avisa_pero_no_cambia_el_status(health, reloj, pusher_ok):
+    """El caso de SUBSUELO-11. Es un aviso para ir a limpiar el tótem, no una
+    falla de operación: el estado sigue hablando de si el tótem puede operar."""
+    revision = {"checked": True, "inspected": 2, "warnDays": 30,
+                "warnings": [AVISO_X2_VENCIDO], "error": None, "_t": reloj()}
+    reloj.avanzar(90)
+    foto = health.snapshot(device=enlace(), pusher=pusher_ok,
+                           session={"active": False, "secondsElapsed": None},
+                           certificates=revision)
+    assert foto["status"] == "ok"
+    assert foto["certificates"]["warnings"] == [AVISO_X2_VENCIDO]
+    assert foto["certificates"]["checkedSecondsAgo"] == 90.0
+    assert "_t" not in foto["certificates"]
+    json.dumps(foto)
+
+
+def test_una_revision_fallida_viaja_con_su_motivo(health, reloj, pusher_ok):
+    revision = {"checked": False, "inspected": None, "warnDays": 30,
+                "warnings": [], "error": "OSError: sin red", "_t": reloj()}
+    foto = health.snapshot(device=enlace(), pusher=pusher_ok,
+                           session={"active": False, "secondsElapsed": None},
+                           certificates=revision)
+    assert foto["certificates"]["checked"] is False
+    assert foto["certificates"]["error"] == "OSError: sin red"
+    assert foto["status"] == "ok"
