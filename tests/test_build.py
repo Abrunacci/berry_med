@@ -82,3 +82,22 @@ def test_las_dos_listas_de_sensores_vigilables_no_divergieron():
     from config import SENSORES_VIGILABLES as en_config
     from src.health import SENSORES_VIGILABLES as en_health
     assert tuple(en_config) == tuple(en_health)
+
+
+def test_el_pyproject_pide_el_mismo_python_que_el_build():
+    """Si divergieran, `poetry install` aceptaría un Python con el que después
+    el build corta, o al revés."""
+    from tools.build_meta import PYTHON_REQUERIDO
+    a, b = PYTHON_REQUERIDO
+    texto = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+    assert re.search(r'^python = "(.+)"', texto, re.M).group(1) == f">={a}.{b},<{a}.{b + 1}"
+
+
+@pytest.mark.parametrize("spec", ["berry-monitor.spec", "berry-configure.spec"])
+def test_el_spec_verifica_python_y_sella_la_version(spec):
+    """Es lo que hace que el build no dependa de cómo se lo corra: con otro
+    Python corta, y el exe siempre sale con su versión adentro."""
+    texto = (REPO / spec).read_text(encoding="utf-8")
+    assert "preparar(" in texto
+    assert "meta['json']" in texto
+    assert "version=meta['version']" in texto

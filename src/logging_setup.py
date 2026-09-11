@@ -37,6 +37,28 @@ def log_path(name: str = "berry-monitor") -> Path:
     return get_app_data_path() / "logs" / f"{name}.log"
 
 
+class _Rotativo(RotatingFileHandler):
+    """RotatingFileHandler que repite una cabecera al principio de cada archivo.
+
+    La cabecera es la línea `[BUILD]` (ver src/build_info.py). El log rota cada
+    2 MB y guarda sólo tres archivos viejos: en un tótem que corre días, la
+    línea del arranque desaparece enseguida, y sin esto el log no diría qué
+    build está corriendo.
+    """
+
+    def __init__(self, *args, cabecera=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cabecera = cabecera
+
+    def doRollover(self):
+        super().doRollover()
+        if self.cabecera:
+            registro = logging.LogRecord(self.name or "berry", logging.INFO, __file__,
+                                         0, self.cabecera, None, None)
+            # Directo al archivo nuevo: pasar por emit() volvería a evaluar la rotación.
+            logging.FileHandler.emit(self, registro)
+
+
 class _Tee:
     """Escribe en el stream original y en el log, una entrada por línea.
 
@@ -107,8 +129,11 @@ def _install_excepthooks(logger):
     threading.excepthook = hilo_hook
 
 
-def setup(name: str = "berry-monitor") -> Optional[Path]:
+def setup(name: str = "berry-monitor", cabecera: Optional[str] = None) -> Optional[Path]:
     """Empieza a duplicar la salida al archivo. Devuelve la ruta, o None.
+
+    `cabecera` se imprime al arrancar y se repite al principio de cada archivo
+    nuevo cuando el log rota: es la línea `[BUILD]` con la versión del exe.
 
     Es best-effort a propósito: que no se pueda escribir el log nunca puede
     impedir que la app arranque.
@@ -117,8 +142,9 @@ def setup(name: str = "berry-monitor") -> Optional[Path]:
         ruta = log_path(name)
         ruta.parent.mkdir(parents=True, exist_ok=True)
 
-        handler = RotatingFileHandler(
+        handler = _Rotativo(
             ruta, maxBytes=MAX_BYTES, backupCount=BACKUPS, encoding="utf-8",
+            cabecera=cabecera,
         )
         handler.setFormatter(
             logging.Formatter("%(asctime)s [%(threadName)s] %(message)s",
@@ -139,10 +165,14 @@ def setup(name: str = "berry-monitor") -> Optional[Path]:
         # hay que poder ver de un vistazo dónde empieza cada uno.
         logger.info("=" * 60)
         logger.info("ARRANQUE de %s", name)
+        if cabecera:
+            print(cabecera)   # por el tee: a la consola y al archivo
         return ruta
     except Exception as exc:
         try:
             print(f"[WARN] No se pudo abrir el archivo de log: {exc}")
+            if cabecera:
+                print(cabecera)
         except Exception:
             pass
         return None

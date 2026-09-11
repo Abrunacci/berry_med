@@ -341,10 +341,12 @@ function Get-Esperado($valida, $s, $conEstricto) {
 # Version de Python y truststore, leidas de los bytes del exe: PyInstaller deja
 # el nombre de la DLL de Python y los nombres de los modulos sin comprimir.
 function Get-InfoExe($ruta, $origen) {
-    $info = [pscustomobject]@{ Ruta = $ruta; Origen = $origen; Modificado = ''; Build = '?'; Python = '?'; Truststore = '?'; Valida = '?' }
+    $info = [pscustomobject]@{ Ruta = $ruta; Origen = $origen; Modificado = ''; Version = ''; Build = '?'; Python = '?'; Truststore = '?'; Valida = '?' }
     try {
         $item = Get-Item -LiteralPath $ruta
         $info.Modificado = $item.LastWriteTime.ToString('yyyy-MM-dd HH:mm')
+        # Los exe generados con build.ps1 traen la version en las propiedades del archivo.
+        $info.Version = "$($item.VersionInfo.ProductVersion)"
         if ($item.Attributes -band 0x401000) { $info.Build = 'en la nube (no descargado)'; return $info }
         $hash = (Get-FileHash -LiteralPath $ruta -Algorithm SHA256).Hash
         $info.Build = if ($buildsConocidos.ContainsKey($hash)) { $buildsConocidos[$hash] } else { "desconocido, SHA-256 $hash" }
@@ -609,7 +611,7 @@ try {
 if (-not $infoExes) { Write-Host "No se encontro berry-monitor.exe." }
 else {
     Write-Host "(ABIERTO = corriendo ahora; INICIO/RUN/TAREA = arranca solo con Windows; disco = solo esta guardado)"
-    Show-Tabla ($infoExes | Select-Object Origen, Ruta, Modificado, Python, Truststore, Valida, Build)
+    Show-Tabla ($infoExes | Select-Object Origen, Ruta, Modificado, Version, Python, Truststore, Valida, Build)
 }
 
 $archivoConfigurado = $null
@@ -817,6 +819,8 @@ try {
             Write-Host "Ultimo error:  $(& $corte $errTls[-1])"
         }
         if ($oks) { Write-Host "Ultima conexion OK: $(& $corte $oks[-1])" }
+        $builds = @($lineas | Where-Object { $_ -match '\[BUILD\]' })
+        if ($builds) { Write-Host "Build segun el log: $(& $corte $builds[-1])" }
     }
 } catch { Write-Host "ERROR en esta seccion: $($_.Exception.Message)" }
 
