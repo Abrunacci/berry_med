@@ -162,8 +162,9 @@ Authorization: Basic base64(API_USERNAME:API_PASSWORD)
 Content-Type: application/json
 ```
 
-El token se arma una vez al arrancar y no rota. Si `SSL_CERT_FILE_PATH` está
-configurado, se usa ese certificado para validar TLS.
+El token se arma una vez al arrancar y no rota. TLS se valida contra el almacén
+de certificados del sistema (truststore, ver `src/ssl_context.py`); en Windows,
+`SSL_CERT_FILE_PATH` no interviene.
 
 ---
 

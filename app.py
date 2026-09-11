@@ -10,9 +10,11 @@ import pysher
 
 from config import build_metrics_url, get_config, redactar
 from src.bluetooth_manager import BMPatientMonitor
+from src.cert_check import REINTENTO_SEG, REVISION_SEG, revisar_certificados
 from src.data_parser import BMDataParser
 from src.logging_setup import setup as setup_logging
 from src.health import HealthReporter
+from src.ssl_context import get_ssl_context
 from src.thermometer_reader import ThermometerReader
 
 # Lo primero de todo: la línea de abajo revienta con TypeError si get_config()
@@ -23,6 +25,11 @@ if _LOG_PATH:
     print(f"[LOG] Guardando salida en: {_LOG_PATH}")
 
 os.environ["SSL_CERT_FILE"] = get_config()["ssl_cert_file"]
+
+# La API y el websocket de Pusher validan con el almacén de certificados del
+# sistema, no con OpenSSL: ver src/ssl_context.py. En Windows, SSL_CERT_FILE ya
+# no interviene en esa validación.
+print("[SSL] Validación de certificados nativa del sistema (truststore)")
 
 
 class VitalsMonitor:
@@ -81,6 +88,11 @@ class VitalsMonitor:
             key=self.credentials["key"],
             cluster=self.credentials["cluster"],
         )
+        # pysher no expone opciones SSL, pero le pasa `socket_kwargs` tal cual
+        # al `run_forever()` del websocket, y recién al conectar.
+        self.pusher_subscriber.connection.socket_kwargs["sslopt"] = {
+            "context": get_ssl_context()
+        }
 
         # Initialize HTTP session for data sending
         self.api_url = self._build_api_url()
@@ -102,6 +114,9 @@ class VitalsMonitor:
             str(self.credentials.get("totem_id") or ""), self.data_parser,
             self.credentials.get("health_expected_sensors"),
         )
+        # Última revisión de certificados del tótem, para el /health. La hace
+        # `_revisar_certificados_si_toca()` una vez por día.
+        self._certificados = None
         print(f"[DEBUG] Endpoint de health: {self.health_url} "
               f"(cada {self.health_interval:.0f}s)"
               if self.health_interval else "[DEBUG] Health desactivado")
@@ -244,8 +259,11 @@ class VitalsMonitor:
             print("[HEALTH] Desactivado (HEALTH_INTERVAL_SECONDS = 0)")
             return
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=get_ssl_context())
+        ) as session:
             while True:
+                await self._revisar_certificados_si_toca()
                 try:
                     cuerpo = self._health_snapshot()
                     async with session.post(
@@ -263,6 +281,40 @@ class VitalsMonitor:
                 except Exception as e:
                     print(f"[HEALTH] No se pudo reportar: {type(e).__name__}: {e}")
                 await asyncio.sleep(self.health_interval)
+
+    async def _revisar_certificados_si_toca(self):
+        """Revisa los certificados del tótem (ver `src/cert_check.py`).
+
+        Al arrancar y después una vez por día; si la revisión falló, se
+        reintenta a la hora. Corre en un hilo aparte porque abre una conexión
+        TLS y lee el almacén de Windows, y eso no puede frenar el event loop.
+        Nunca lanza: el health tiene que salir igual.
+        """
+        previa = self._certificados
+        if previa is not None:
+            espera = REVISION_SEG if previa.get("checked") else REINTENTO_SEG
+            if time.monotonic() - previa["_t"] < espera:
+                return
+        try:
+            revision = await asyncio.to_thread(revisar_certificados, self.health_url)
+        except Exception as e:
+            revision = {"checked": False, "inspected": None, "warnDays": None,
+                        "warnings": [], "error": f"{type(e).__name__}: {e}",
+                        "_t": time.monotonic()}
+        self._certificados = revision
+
+        for aviso in revision["warnings"]:
+            cuando = ("VENCIDO" if aviso["expired"]
+                      else f"vence en {aviso['daysLeft']} días")
+            print(f"[CERT] AVISO: '{aviso['subject']}' emitido por "
+                  f"'{aviso['issuer']}' ({cuando}, {aviso['notAfter'][:10]}) "
+                  f"en el almacén {'/'.join(aviso['stores'])} de Windows. "
+                  f"Ver docs/certificado_vencido.md")
+        if revision["checked"] and not revision["warnings"]:
+            print(f"[CERT] Certificados de la cadena en el almacén: "
+                  f"{revision['inspected']}, sin avisos")
+        elif not revision["checked"]:
+            print(f"[CERT] No se pudo revisar: {revision['error']}")
 
     def _health_snapshot(self) -> dict:
         """Foto del estado actual. Ver `src/health.py` para el objeto."""
@@ -283,6 +335,7 @@ class VitalsMonitor:
             pusher=self.pusher_subscriber,
             session={"active": self.is_sending_data,
                      "secondsElapsed": transcurrido},
+            certificates=self._certificados,
         )
 
     def connect_handler(self, data):
@@ -396,7 +449,9 @@ class VitalsMonitor:
 
     async def send_data(self):
         """Send data via HTTP POST"""
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=get_ssl_context())
+        ) as session:
             while True:
                 try:
                     if not self.is_sending_data:
