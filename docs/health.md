@@ -27,6 +27,10 @@ los sensores, e implementación en `src/health.py`.
   | 3 | ¿Llegan las órdenes del backend? | `pusher` |
   | 4 | ¿Las sondas están conectadas? | `disconnectedSensors` |
 
+- Y agrega un aviso aparte, que no cambia el estado: si el tótem tiene
+  certificados de la cadena del backend vencidos o por vencer
+  (`certificates.warnings`, §6).
+
 ---
 
 ## 2. La regla: nada se lee de un flag, todo se mide
@@ -94,7 +98,7 @@ paquete, de forma permanente. Sin esta condición ese tótem reporta `degraded`
 para siempre — el mismo ruido permanente que el "no finger" del SpO₂, y por la
 misma razón: una alerta que suena siempre no es una alerta.
 
-Se declara en `HEALTH_EXPECTED_SENSORS` (§7). Sólo `spo2` y `temperature` se
+Se declara en `HEALTH_EXPECTED_SENSORS` (§8). Sólo `spo2` y `temperature` se
 pueden vigilar: son las únicas dos desconexiones que el protocolo transmite
 (§3.4).
 
@@ -157,7 +161,25 @@ algo que se pueda agregar después — el protocolo no lo transmite.
   "disconnectedSensors": [],
   "expectedSensors": ["spo2"],
   "sensorsWithoutPatient": ["ecg", "spo2"],
-  "session": { "active": false, "secondsElapsed": null }
+  "session": { "active": false, "secondsElapsed": null },
+  "certificates": {
+    "checked": true,
+    "checkedSecondsAgo": 3598.2,
+    "inspected": 2,
+    "warnDays": 30,
+    "warnings": [
+      {
+        "subject": "ISRG Root X2",
+        "issuer": "ISRG Root X1",
+        "stores": ["CA"],
+        "notAfter": "2025-09-15T16:00:00Z",
+        "daysLeft": -360,
+        "expired": true,
+        "sha1": "151682F5218C0A511C28F4060A73B9CA78CE9A53"
+      }
+    ],
+    "error": null
+  }
 }
 ```
 
@@ -181,6 +203,12 @@ algo que se pueda agregar después — el protocolo no lo transmite.
 | `expectedSensors` | Qué sondas se vigilan acá. Permite distinguir "no hay alerta" de "no se está mirando". |
 | `sensorsWithoutPatient` | Conectadas pero sin nadie puesto. Informativo. |
 | `session.active` | Si hay una sesión de medición en curso. |
+| `certificates.warnings` | Certificados de la cadena del backend, guardados en el tótem, vencidos o que vencen en menos de `warnDays` días. **Es un aviso**: no cambia `status`. Ver §6. |
+| `certificates.warnings[].daysLeft` | Días que le quedan. Negativo = vencido hace esos días (`expired: true`). |
+| `certificates.warnings[].stores` | En qué almacén de Windows está: `CA` (intermedios) o `ROOT` (raíces). |
+| `certificates.checked` | Si la revisión se pudo hacer. Con `false`, el motivo va en `certificates.error`. |
+| `certificates.inspected` | Cuántos certificados de la cadena se encontraron en el almacén. Distingue "no hay avisos" de "no había nada que mirar". |
+| `certificates.checkedSecondsAgo` | Antigüedad de la revisión: se hace una vez por día. |
 
 > Los sensores que el equipo todavía no reportó **no aparecen** en `sensors`. No
 > se inventa un "desconocido" que taparía el dato real.
@@ -216,7 +244,44 @@ operación, y no debería disparar la misma alarma que un tótem incomunicado.
 
 ---
 
-## 6. Por qué es una tarea aparte
+## 6. Certificados del tótem
+
+Además de las cuatro preguntas, el health avisa si en el almacén de
+certificados de Windows del tótem hay un certificado de la cadena del backend
+**vencido o que vence en menos de 30 días**.
+
+Viene de un incidente real, en septiembre de 2026 (ver
+[`certificado_vencido.md`](certificado_vencido.md)): algunos tótems tenían
+guardado el cruce viejo "ISRG Root X2" emitido por "ISRG Root X1", vencido
+hacía un año, y dejaron de conectar el día que ese certificado pasó a decidir
+la validación. Nadie lo sabía hasta que fallaron.
+
+Qué se mira:
+
+- Lo que Windows ofrece para validar servidores: almacenes `CA` y `ROOT`, con
+  propósito de autenticación de servidor. Es lo mismo que carga Python.
+- De eso, **sólo** los certificados con el sujeto de algún emisor de la cadena
+  que manda el backend. Un almacén de Windows trae decenas de certificados
+  vencidos que no tienen nada que ver (raíces viejas de Microsoft, de
+  timestamping): avisar por ellos sería ruido permanente. La cadena se toma de
+  una conexión real, así que si cambia la jerarquía de Let's Encrypt la
+  revisión la sigue sola.
+
+Cuándo: al arrancar y después una vez por día. Si la revisión falla (sin red,
+backend caído) se reintenta a la hora. Corre en un hilo aparte y nunca frena ni
+tumba el reporte. Cada revisión deja una línea `[CERT]` en el log.
+
+**No cambia `status`.** Con truststore, un intermedio vencido en el almacén ya
+no corta la conexión de berry-monitor: es un aviso para ir a limpiar el tótem
+(`tools/reparar_ssl.ps1`), no una falla de operación. Una raíz por vencer sí
+cortaría, y para eso está el margen de 30 días.
+
+Fuera de Windows (desarrollo en WSL o Linux) o con una API `http://` no hay
+nada que revisar: sale `checked: false` con el motivo en `error`.
+
+---
+
+## 7. Por qué es una tarea aparte
 
 El reporte **no** viaja colgado del POST de métricas, por dos razones:
 
@@ -232,7 +297,7 @@ puede tumbar el monitoreo.
 
 ---
 
-## 7. Configuración
+## 8. Configuración
 
 | Clave | Default | Qué hace |
 |---|---|---|
@@ -252,11 +317,12 @@ Las tres se cargan desde `berry-configure.exe`.
 
 ---
 
-## 8. Dónde está cada cosa
+## 9. Dónde está cada cosa
 
 | Archivo | Qué aporta |
 |---|---|
 | `src/health.py` | Arma el objeto y calcula `status`. |
+| `src/cert_check.py` | Revisa los certificados del tótem contra la cadena del backend (§6). |
 | `src/pm6750_protocol.py` | Tablas de estados y la clasificación `SENSOR_DESCONECTADO` / `SENSOR_SIN_PACIENTE`. |
 | `src/data_parser.py` | Registra el estado de cada sensor en `sensor_status`, aparte del payload de métricas. |
 | `src/serial_manager.py` · `src/bluetooth_manager.py` | `link_status()`, mismo contrato en los dos transportes. |

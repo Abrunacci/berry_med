@@ -152,7 +152,24 @@ class HealthReporter:
             return {"connected": False, "state": None, "socketId": None,
                     "error": f"{type(e).__name__}: {e}"}
 
-    def snapshot(self, device: dict, pusher, session: dict) -> dict:
+    @staticmethod
+    def _certificados_publicos(revision) -> dict:
+        """Última revisión de certificados del tótem (ver `src/cert_check.py`).
+
+        Va siempre y con la misma forma, para que el backend distinga "no hay
+        avisos" de "no se revisó": con `checked: false`, el motivo va en
+        `error`. Como con los sensores, la marca `_t` no se publica: se
+        convierte en antigüedad.
+        """
+        if not revision:
+            return {"checked": False, "checkedSecondsAgo": None, "inspected": None,
+                    "warnDays": None, "warnings": [], "error": "todavía no se revisó"}
+        salida = {k: v for k, v in revision.items() if k != "_t"}
+        t = revision.get("_t")
+        salida["checkedSecondsAgo"] = round(time.monotonic() - t, 1) if t is not None else None
+        return salida
+
+    def snapshot(self, device: dict, pusher, session: dict, certificates: dict = None) -> dict:
         sensores = self._sensores_publicos()
         pusher_st = self._pusher_status(pusher)
 
@@ -200,4 +217,7 @@ class HealthReporter:
             # informativo: es el estado normal de un tótem esperando paciente.
             "sensorsWithoutPatient": sin_paciente,
             "session": session,
+            # Certificados del tótem vencidos o por vencer. Es un aviso: no
+            # toca `status`, que habla de si el tótem puede operar.
+            "certificates": self._certificados_publicos(certificates),
         }

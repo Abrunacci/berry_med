@@ -10,7 +10,9 @@ a = Analysis(
     # PyInstaller no resuelve sus submódulos solo: van todos listados acá.
     # Si se agrega un módulo a src/, agregarlo también en esta lista o el exe
     # revienta al arrancar con ModuleNotFoundError.
-    hiddenimports=['asyncio', 'bleak', 'pysher', 'src.data_parser', 'src.bluetooth_manager', 'src.thermometer_reader', 'src.serial_manager', 'src.logging_setup', 'src.health', 'src.pm6750_protocol', 'src.usbrelay', 'logging.handlers', 'aiohttp', 'aiohttp.client', 'serial', 'serial.serialwin32', 'serial.tools.list_ports_windows'],
+    # truststore elige su backend por SO con un import condicional: el de
+    # Windows va explícito para no depender de que el análisis lo siga.
+    hiddenimports=['asyncio', 'bleak', 'pysher', 'src.data_parser', 'src.bluetooth_manager', 'src.thermometer_reader', 'src.serial_manager', 'src.logging_setup', 'src.health', 'src.pm6750_protocol', 'src.usbrelay', 'src.ssl_context', 'src.cert_check', 'logging.handlers', 'aiohttp', 'aiohttp.client', 'serial', 'serial.serialwin32', 'serial.tools.list_ports_windows', 'truststore', 'truststore._windows'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

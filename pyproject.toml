@@ -14,6 +14,7 @@ pysher = "^1.0.8"
 certifi = "^2024.8.30"
 aiohttp = "^3.11.9"
 pyserial = "^3.5"
+truststore = "^0.10.4"
 
 
 [tool.poetry.group.dev.dependencies]
