@@ -1,11 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
+import sys
 
+sys.path.insert(0, SPECPATH)
+from tools.build_meta import preparar
+
+# Corta si el build no es con Python 3.13 y sella la version (build_info.json
+# adentro del exe y recurso de version de Windows). Ver tools/build_meta.py.
+meta = preparar('berry-configure', SPECPATH)
 
 a = Analysis(
     ['configure.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[(meta['json'], '.')],
     # tkinter y configure_gui van explícitos: la GUI se importa dentro de una
     # función (para poder caer al asistente de texto si no está), y así se
     # garantiza que PyInstaller igual la empaquete.
@@ -26,6 +33,8 @@ exe = EXE(
     a.datas,
     [],
     name='berry-configure',
+    # Clic derecho > Propiedades > Detalles: version, commit y Python.
+    version=meta['version'],
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

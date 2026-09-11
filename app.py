@@ -10,6 +10,7 @@ import pysher
 
 from config import build_metrics_url, get_config, redactar
 from src.bluetooth_manager import BMPatientMonitor
+from src.build_info import obtener as obtener_build, texto as texto_build
 from src.cert_check import REINTENTO_SEG, REVISION_SEG, revisar_certificados
 from src.data_parser import BMDataParser
 from src.logging_setup import setup as setup_logging
@@ -20,7 +21,11 @@ from src.thermometer_reader import ThermometerReader
 # Lo primero de todo: la línea de abajo revienta con TypeError si get_config()
 # devuelve None, y sin esto un arranque fallido no deja ningún rastro — que es
 # justo lo que pasa cuando la app la levanta Windows sola y nadie está mirando.
-_LOG_PATH = setup_logging("berry-monitor")
+#
+# La cabecera dice qué build es este (versión, commit, Python): va al log al
+# arrancar y se repite en cada archivo nuevo cuando rota. Ver src/build_info.py.
+_BUILD = obtener_build("berry-monitor")
+_LOG_PATH = setup_logging("berry-monitor", cabecera=f"[BUILD] {texto_build(_BUILD)}")
 if _LOG_PATH:
     print(f"[LOG] Guardando salida en: {_LOG_PATH}")
 
@@ -113,6 +118,7 @@ class VitalsMonitor:
         self.health = HealthReporter(
             str(self.credentials.get("totem_id") or ""), self.data_parser,
             self.credentials.get("health_expected_sensors"),
+            build=_BUILD,
         )
         # Última revisión de certificados del tótem, para el /health. La hace
         # `_revisar_certificados_si_toca()` una vez por día.

@@ -184,7 +184,7 @@ def test_el_objeto_trae_todo_lo_que_el_backend_espera(health, pusher_ok):
     assert set(foto) == {
         "totemId", "status", "uptimeSeconds", "device", "pusher", "sensors",
         "disconnectedSensors", "expectedSensors", "sensorsWithoutPatient",
-        "session", "certificates",
+        "session", "certificates", "build",
     }
 
 
@@ -327,3 +327,13 @@ def test_una_revision_fallida_viaja_con_su_motivo(health, reloj, pusher_ok):
     assert foto["certificates"]["checked"] is False
     assert foto["certificates"]["error"] == "OSError: sin red"
     assert foto["status"] == "ok"
+
+
+def test_el_build_del_exe_viaja_en_el_health(parser, reloj, pusher_ok):
+    """Qué exe corre en el tótem, visible desde el backend sin ir al tótem."""
+    build = {"name": "berry-monitor", "version": "1.0.9", "commit": "abc1234"}
+    reporter = HealthReporter("totem-01", parser, build=build)
+    foto = reporter.snapshot(device=enlace(), pusher=pusher_ok,
+                             session={"active": False, "secondsElapsed": None})
+    assert foto["build"] == build
+    json.dumps(foto)

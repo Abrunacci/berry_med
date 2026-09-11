@@ -7,7 +7,7 @@ This document is for contributors or developers working with the BerryMed source
 ## Prerequisites
 
 - Windows 10+
-- Python 3.11+
+- Python 3.13 (exacta: ver [Building](#building-executables-on-windows))
 - [Poetry](https://python-poetry.org/) – Python dependency manager
 - A compatible BerryMed device (Bluetooth or USB)
 - Optional: USB IR thermometer on a separate COM port
@@ -80,222 +80,68 @@ Temperature is sent only in `data.vitalSigns.temperature` (Celsius string).
 
 ---
 
-## Building Executables on Windows (step by step)
+## Building Executables on Windows
 
-PyInstaller genera un `.exe` para el sistema operativo donde lo ejecutás. El build **debe hacerse en Windows**, aunque el código esté en WSL o en otro equipo: copiá el repo a Windows y seguí estos pasos ahí.
+Los exe se generan **siempre con `build.ps1`**, en Windows. Hace los mismos
+pasos en cualquier PC y en GitHub Actions, así dos builds del mismo commit salen
+iguales.
 
-Usá siempre los archivos `.spec` del repositorio (`berry-configure.spec` y `berry-monitor.spec`). No uses el comando largo antiguo con `--hidden-import` suelto.
+> **Python 3.13, exacta.** La versión de Python cambia cómo el exe valida TLS
+> (en 3.13 hay modo estricto: ver `docs/certificado_vencido.md`, §2.3), y ya
+> hubo exes con 3.11 y con 3.13 mezclados en los tótems. Los `.spec` cortan el
+> build con cualquier otra versión, se los corra como se los corra
+> (`tools/build_meta.py`).
 
----
+### Build local
 
-### Paso 0 — Requisitos previos
-
-Instalá en la PC de build:
-
-| Herramienta | Versión | Verificación |
-|-------------|---------|--------------|
-| Windows | 10 o superior | — |
-| Python | 3.11, 3.12 o 3.13 | `python --version` |
-| Poetry | Última estable | `poetry --version` |
-| Git (opcional) | Cualquiera | `git --version` |
-
-Instalación de Poetry (PowerShell):
+Requisitos: Windows 10+, Python 3.13 (python.org o Microsoft Store) y Git. No
+hace falta instalar Poetry: el script usa su propia copia.
 
 ```powershell
-(Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | python -
+cd C:\ruta\a\berry_med
+powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
 ```
 
-Cerrá y volvé a abrir la terminal después de instalar Poetry.
+Qué hace:
 
----
+1. Busca Python 3.13 (`py -3.13`, `python3.13` o `python`). Si no está, corta.
+2. Arma `.venv` con las versiones exactas de `poetry.lock` (`poetry sync`).
+   Poetry vive aparte, en `.tools\poetry`.
+3. Corre los tests. `-SinTests` los saltea.
+4. Genera `dist\berry-monitor.exe` y `dist\berry-configure.exe` con los `.spec`.
+5. Verifica cada exe (trae Python 3.13; el monitor trae truststore) y deja en
+   `dist\build-info.txt` la versión y el SHA-256 de cada uno.
 
-### Paso 1 — Abrir terminal en la carpeta del proyecto
+`dist/` no se versiona: los exe no se commitean.
 
-**PowerShell** o **CMD**:
+### Versión
 
-```powershell
-cd C:\ruta\donde\clonaste\berry_med
-```
+Sale de git (`git describe --tags`): en un tag queda `1.0.9`; en commits
+posteriores, `1.0.9-3-gabc1234`; con cambios sin commitear termina en `-dirty`.
+Queda sellada en tres lugares:
 
-Si clonás desde cero:
+- En el **log** de berry-monitor: una línea `[BUILD] ...` al arrancar, que se
+  repite al principio de cada archivo cuando el log rota.
+- En las **propiedades del exe**: clic derecho > Propiedades > Detalles >
+  Versión del producto.
+- En el **`/health`**, campo `build`.
 
-```powershell
-git clone https://github.com/Abrunacci/berry_med.git
-cd berry_med
-```
+### Releases
 
-Confirmá que existan estos archivos en la raíz:
+1. Crear la release en GitHub (Releases > Draft a new release) con un tag nuevo,
+   por ejemplo `1.0.9`, y publicarla.
+2. El workflow `build` genera los exe en Windows con `build.ps1` y los adjunta a
+   la release, junto con `build-info.txt`. Tarda unos minutos.
 
-- `app.py`
-- `configure.py`
-- `berry-monitor.spec`
-- `berry-configure.spec`
-- `pyproject.toml`
+Los técnicos bajan los exe de la release. Para un build de prueba sin release:
+Actions > build > Run workflow, y bajar el artefacto `berry-exes`.
 
----
+### Probar el exe
 
-### Paso 2 — Instalar dependencias con Poetry
-
-```powershell
-poetry install
-```
-
-Qué debería pasar:
-
-- Poetry crea un entorno virtual (`.venv`) si no existe.
-- Instala dependencias de `pyproject.toml`: `bleak`, `pyserial`, `aiohttp`, `pysher`, `pyinstaller`, etc.
-- Al final no debería haber errores de resolución de paquetes.
-
-Verificación opcional:
-
-```powershell
-poetry run python -c "import serial; import aiohttp; print('OK')"
-```
-
-Si imprime `OK`, el entorno está listo para el build.
-
----
-
-### Paso 3 — Build de `berry-configure.exe`
-
-```powershell
-poetry run pyinstaller berry-configure.spec --clean --noconfirm
-```
-
-Qué hace cada flag:
-
-- `berry-configure.spec` — define entrada `configure.py`, nombre del exe y módulos ocultos.
-- `--clean` — borra caché de builds anteriores (recomendado siempre tras cambios de código).
-- `--noconfirm` — sobrescribe `dist/` y `build/` sin preguntar.
-
-Al terminar, deberías ver algo como:
-
-```text
-Building EXE from EXE-00.toc completed successfully.
-```
-
-Archivo generado:
-
-```text
-dist\berry-configure.exe
-```
-
----
-
-### Paso 4 — Build de `berry-monitor.exe`
-
-```powershell
-poetry run pyinstaller berry-monitor.spec --clean --noconfirm
-```
-
-Este spec incluye lo necesario para USB y termómetro:
-
-- `serial`, `serial.serialwin32`, `serial.tools.list_ports_windows`
-- `src.thermometer_reader`, `src.data_parser`, `src.bluetooth_manager`
-- `bleak`, `pysher`, `aiohttp`
-
-Archivo generado:
-
-```text
-dist\berry-monitor.exe
-```
-
-Comprobá que `dist\` contiene **ambos** ejecutables:
-
-```powershell
-dir dist\*.exe
-```
-
----
-
-### Paso 5 — Configurar credenciales (primera vez o cambio de entorno)
-
-Ejecutá el configurador:
-
-```powershell
-.\dist\berry-configure.exe
-```
-
-Completá los prompts. Ejemplo de valores:
-
-| Campo | Ejemplo |
-|-------|---------|
-| Pusher Key / Cluster | Los de tu cuenta Pusher |
-| Totem ID | `totem12` |
-| API URL | `https://tu-api.com/vitals` o `http://127.0.0.1:8080/vitals` (pruebas locales) |
-| Device connection | `usb` o `bt` |
-| Device port (Berry) | `COM6` |
-| Thermometer enabled | `true` |
-| Thermometer port | `COM5` (distinto al del Berry) |
-| SSL cert path | Ruta a un `.pem` válido (puede quedar vacío solo para HTTP local) |
-
-El archivo se guarda en:
-
-```text
-%APPDATA%\BerryMed Monitor\credentials.json
-```
-
-Ruta típica:
-
-```text
-C:\Users\<tu_usuario>\AppData\Roaming\BerryMed Monitor\credentials.json
-```
-
-Podés abrirlo con el Bloc de notas para revisar que `THERMOMETER_ENABLED` y `THERMOMETER_PORT` quedaron como esperás.
-
----
-
-### Paso 6 — Ejecutar el monitor
-
-```powershell
-.\dist\berry-monitor.exe
-```
-
-Señales de que el build es correcto (código actual):
-
-1. Al inicio imprime un diccionario de config con claves como:
-   - `thermometer_enabled`
-   - `thermometer_port`
-   - `thermometer_baud`
-2. Si el termómetro está habilitado, aparecen líneas `[THERM]`:
-   - `[THERM] Reader started on COM5 @ 115200`
-   - `[THERM] Connected to COM5` (o `[THERM][WARN] Connection issue` si el puerto falla)
-3. Tras el evento Pusher `start-monitoring`, los POST incluyen `vitalSigns.temperature` (sin clave `thermometer` en el JSON).
-
-Si el `print(cfg)` **no** muestra `thermometer_enabled`, el exe es viejo: volvé al Paso 4 con `--clean`.
-
----
-
-### Paso 7 — Distribuir los ejecutables (opcional)
-
-Para usar en otra PC Windows sin instalar Python:
-
-1. Copiá `berry-configure.exe` y `berry-monitor.exe` desde `dist\`.
-2. En la PC destino, ejecutá primero `berry-configure.exe` (genera su propio `credentials.json` en AppData de ese usuario).
-3. Conectá Berry y termómetro; instalá [Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist) si el exe reporta DLL faltante.
-
-No hace falta copiar la carpeta `build\` ni todo el repo, solo los `.exe` de `dist\`.
-
----
-
-### Paso 8 — Rebuild después de cambiar código
-
-Cada vez que modifiques `app.py`, `config.py`, módulos en `src/` o los `.spec`:
-
-```powershell
-poetry install
-poetry run pyinstaller berry-monitor.spec --clean --noconfirm
-```
-
-Si también cambiaste `configure.py`:
-
-```powershell
-poetry run pyinstaller berry-configure.spec --clean --noconfirm
-```
-
-Siempre usá `--clean` para no empaquetar bytecode o dependencias de un build anterior.
-
----
+1. `dist\berry-configure.exe` para cargar la configuración
+   (`%APPDATA%\BerryMed Monitor\credentials.json`).
+2. `dist\berry-monitor.exe`. Al arrancar tiene que mostrar la línea `[BUILD]`
+   con la versión y `Python 3.13`.
 
 ### Prueba local del payload (opcional)
 
@@ -331,14 +177,12 @@ Dispará `start-monitoring` desde Pusher; en la terminal del mock deberías ver 
 
 | Síntoma | Causa probable | Qué hacer |
 |---------|----------------|-----------|
-| `poetry: command not found` | Poetry no instalado o no en PATH | Reinstalar Poetry; reiniciar terminal |
-| `ModuleNotFoundError: serial` al ejecutar el exe | Build sin `pyserial` o spec viejo | `poetry install` + rebuild con `berry-monitor.spec --clean` |
-| `pyinstaller` no reconocido | Se invocó fuera del venv | Prefijo `poetry run` en todos los comandos |
-| Exe no lee `THERMOMETER_*` | Binario compilado antes del soporte termómetro | Rebuild monitor con `--clean`; verificar `print(cfg)` |
-| `Cannot connect to host 0.0.0.0:8080` | URL incorrecta en API_URL | Usar `http://127.0.0.1:8080/...` |
+| `No se encontro Python 3.13` | No está instalado, o no está en el PATH | Instalar Python 3.13 y volver a correr `build.ps1` |
+| `[BUILD] Los exe se generan con Python 3.13, y este es 3.x` | Se corrió PyInstaller con otro Python | Usar `build.ps1` |
+| `[BUILD] Faltan módulos en este entorno` | El entorno no tiene las versiones de `poetry.lock` | Usar `build.ps1` |
+| `ModuleNotFoundError` al ejecutar el exe | Se agregó un módulo a `src/` sin sumarlo a `hiddenimports` del spec | Agregarlo; `tests/test_build.py` lo avisa |
 | Falta DLL al abrir el exe | Runtime de VC++ no instalado | Instalar VC++ Redistributable x64 |
 | `[THERM][WARN] Connection issue` | Puerto COM mal o ocupado | Administrador de dispositivos → Puertos COM; Berry y termómetro en puertos distintos |
-| Build muy lento la primera vez | Normal | PyInstaller analiza todas las dependencias; builds siguientes son más rápidos con caché (pero tras cambios de código usá `--clean`) |
 
 ---
 
@@ -405,6 +249,9 @@ I/O contra el equipo, y un `.bin` no dice si el Berry engancha. Después de toca
 - `docs/backend.md` – qué se manda al backend y a qué endpoints
 - `docs/configuracion.md` – todas las claves de configuración
 - `berry-monitor.spec` / `berry-configure.spec` – PyInstaller build specs
+- `build.ps1` – build de los dos exe (ver Building)
+- `tools/build_meta.py` – guarda de Python 3.13 y sello de versión que usan los `.spec`
+- `src/build_info.py` – lee el sello desde el exe; va al log y al `/health`
 
 ---
 

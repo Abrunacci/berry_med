@@ -77,7 +77,7 @@ class HealthReporter:
     así que un lector nunca ve una entrada a medio escribir.
     """
 
-    def __init__(self, totem_id: str, parser, sensores_esperados=None):
+    def __init__(self, totem_id: str, parser, sensores_esperados=None, build=None):
         self.totem_id = totem_id
         self.parser = parser
         # Qué sondas tiene puestas este tótem. Sin lista, se esperan todas las
@@ -87,6 +87,8 @@ class HealthReporter:
             SENSORES_VIGILABLES if sensores_esperados is None else sensores_esperados
         )
         self._arranque = time.monotonic()
+        # Qué exe es este (src/build_info.py). Viaja tal cual en cada reporte.
+        self.build = dict(build or {})
 
     # --- armado del objeto --------------------------------------------------
 
@@ -220,4 +222,7 @@ class HealthReporter:
             # Certificados del tótem vencidos o por vencer. Es un aviso: no
             # toca `status`, que habla de si el tótem puede operar.
             "certificates": self._certificados_publicos(certificates),
+            # Versión, commit y Python del exe. El log del tótem ya lo tiene;
+            # acá es para verlo desde el backend sin ir al tótem.
+            "build": self.build,
         }
