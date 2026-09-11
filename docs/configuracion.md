@@ -84,7 +84,7 @@ Obligatorias en **negrita**. El resto tiene default y se puede omitir.
 | `API_ENDPOINT` | `metrics` | Último tramo de la URL de métricas, después del Totem ID. |
 | **`API_USERNAME`** | — | Usuario del HTTP Basic. |
 | **`API_PASSWORD`** | — | Contraseña del HTTP Basic. Se tapa en el log. |
-| `SSL_CERT_FILE_PATH` | *(vacío)* | Bundle `.pem` para validar TLS. Se exporta como `SSL_CERT_FILE`. |
+| `SSL_CERT_FILE_PATH` | *(vacío)* | Bundle `.pem`; se exporta como `SSL_CERT_FILE`. En Windows ya no interviene en la validación TLS: la API y Pusher validan contra el almacén del sistema (`src/ssl_context.py`). |
 | `MAX_SESSION_MINUTES` | `30` | Si el evento de stop nunca llega, la sesión se corta sola pasados estos minutos. **`0` desactiva el corte** — y entonces el tótem puede quedar posteando para siempre. |
 
 La URL final queda `{API_URL}/{TOTEM_ID}/{API_ENDPOINT}`. Ver

@@ -13,6 +13,7 @@ from src.bluetooth_manager import BMPatientMonitor
 from src.data_parser import BMDataParser
 from src.logging_setup import setup as setup_logging
 from src.health import HealthReporter
+from src.ssl_context import get_ssl_context
 from src.thermometer_reader import ThermometerReader
 
 # Lo primero de todo: la línea de abajo revienta con TypeError si get_config()
@@ -23,6 +24,11 @@ if _LOG_PATH:
     print(f"[LOG] Guardando salida en: {_LOG_PATH}")
 
 os.environ["SSL_CERT_FILE"] = get_config()["ssl_cert_file"]
+
+# La API y el websocket de Pusher validan con el almacén de certificados del
+# sistema, no con OpenSSL: ver src/ssl_context.py. En Windows, SSL_CERT_FILE ya
+# no interviene en esa validación.
+print("[SSL] Validación de certificados nativa del sistema (truststore)")
 
 
 class VitalsMonitor:
@@ -81,6 +87,11 @@ class VitalsMonitor:
             key=self.credentials["key"],
             cluster=self.credentials["cluster"],
         )
+        # pysher no expone opciones SSL, pero le pasa `socket_kwargs` tal cual
+        # al `run_forever()` del websocket, y recién al conectar.
+        self.pusher_subscriber.connection.socket_kwargs["sslopt"] = {
+            "context": get_ssl_context()
+        }
 
         # Initialize HTTP session for data sending
         self.api_url = self._build_api_url()
@@ -244,7 +255,9 @@ class VitalsMonitor:
             print("[HEALTH] Desactivado (HEALTH_INTERVAL_SECONDS = 0)")
             return
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=get_ssl_context())
+        ) as session:
             while True:
                 try:
                     cuerpo = self._health_snapshot()
@@ -396,7 +409,9 @@ class VitalsMonitor:
 
     async def send_data(self):
         """Send data via HTTP POST"""
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=get_ssl_context())
+        ) as session:
             while True:
                 try:
                     if not self.is_sending_data:
