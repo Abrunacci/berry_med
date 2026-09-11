@@ -1,8 +1,9 @@
 *.pyc
 __pycache__/
 build/
+dist/
 .venv/
-poetry.lock
+.tools/
 .cursorignore
 .cursorrules
 captura.bin
