@@ -10,7 +10,7 @@ A simple tool for monitoring vital signs from BerryMed devices over Bluetooth or
 
 - Windows 10+
 - A compatible BerryMed device (Bluetooth or USB)
-- `berry-configure.exe` and `berry-monitor.exe` from the `dist/` folder
+- `berry-configure.exe` and `berry-monitor.exe` from the [latest release](https://github.com/Abrunacci/berry_med/releases/latest)
 
 ---
 
@@ -103,7 +103,7 @@ See [About the SSL Certificate](#about-the-ssl-certificate) for instructions.
 - Make sure your BerryMed device is turned on and Bluetooth is enabled (if using BT mode).
 - For USB mode, ensure the correct COM port is selected for the Berry (`DEVICE_PORT`).
 - Thermometer uses a **different** COM port (`THERMOMETER_PORT`); both cannot share the same port.
-- If temperature never updates from the USB thermometer, rebuild `berry-monitor.exe` with `poetry run pyinstaller berry-monitor.spec --clean --noconfirm` and check startup logs for `[THERM] Connected to COMx`.
+- If temperature never updates from the USB thermometer, check that you are running the latest release (the `[BUILD]` line at startup shows the version) and look for `[THERM] Connected to COMx` in the startup logs.
 - Install the [Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist) if you encounter missing DLL errors.
 
 ---
@@ -117,17 +117,13 @@ See [About the SSL Certificate](#about-the-ssl-certificate) for instructions.
 
 ## Building from source (Windows)
 
-Guía resumida; el paso a paso completo está en [development.md — Building Executables on Windows](development.md#building-executables-on-windows-step-by-step).
+Guía resumida; el detalle está en [development.md — Building Executables on Windows](development.md#building-executables-on-windows).
 
-1. Instalar Python 3.11+ y [Poetry](https://python-poetry.org/) en Windows.
-2. Clonar el repo y abrir terminal en la carpeta `berry_med`.
-3. `poetry install`
-4. `poetry run pyinstaller berry-configure.spec --clean --noconfirm`
-5. `poetry run pyinstaller berry-monitor.spec --clean --noconfirm`
-6. Ejecutar `dist\berry-configure.exe` (configura credenciales en AppData).
-7. Ejecutar `dist\berry-monitor.exe` (monitoreo).
+1. Instalar **Python 3.13** y Git en Windows.
+2. Clonar el repo y abrir PowerShell en la carpeta `berry_med`.
+3. `powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1`
 
-Salida en `dist\`: `berry-configure.exe` y `berry-monitor.exe`. Tras cambios de código, repetir el build del exe afectado con `--clean`.
+Salida en `dist\`: `berry-configure.exe`, `berry-monitor.exe` y `build-info.txt` (versión y SHA-256 de cada uno). Las versiones publicadas se generan solas al publicar una release en GitHub.
 
 ---
 
