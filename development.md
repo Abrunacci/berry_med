@@ -246,7 +246,7 @@ I/O contra el equipo, y un `.bin` no dice si el Berry engancha. Después de toca
 - `pyproject.toml` – dependencies and build config (Poetry)
 - `tests/` – set de tests (pytest); `tests/escenarios.py` define qué se captura
 - `tools/capturar_escenarios.py` – graba las capturas del equipo para los tests
-- `docs/backend.md` – qué se manda al backend y a qué endpoints
+- `docs/backend.md` – contrato de integración con el backend: payloads y endpoints
 - `docs/configuracion.md` – todas las claves de configuración
 - `berry-monitor.spec` / `berry-configure.spec` – PyInstaller build specs
 - `build.ps1` – build de los dos exe (ver Building)
