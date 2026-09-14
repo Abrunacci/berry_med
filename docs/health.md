@@ -30,6 +30,8 @@ los sensores, e implementación en `src/health.py`.
 - Y agrega un aviso aparte, que no cambia el estado: si el tótem tiene
   certificados de la cadena del backend vencidos o por vencer
   (`certificates.warnings`, §6).
+- Además viaja el sello del exe (`build`): qué versión y qué commit está
+  corriendo ese tótem, para no tener que entrar al equipo a averiguarlo.
 
 ---
 
@@ -179,6 +181,17 @@ algo que se pueda agregar después — el protocolo no lo transmite.
       }
     ],
     "error": null
+  },
+  "build": {
+    "name": "berry-monitor",
+    "version": "1.0.9",
+    "commit": "7f9904d",
+    "dirty": false,
+    "dirtyFiles": [],
+    "builtAt": "2026-09-14T14:08:11Z",
+    "python": "3.13.7",
+    "builder": "github-actions",
+    "runtimePython": "3.13.7"
   }
 }
 ```
@@ -209,6 +222,11 @@ algo que se pueda agregar después — el protocolo no lo transmite.
 | `certificates.checked` | Si la revisión se pudo hacer. Con `false`, el motivo va en `certificates.error`. |
 | `certificates.inspected` | Cuántos certificados de la cadena se encontraron en el almacén. Distingue "no hay avisos" de "no había nada que mirar". |
 | `certificates.checkedSecondsAgo` | Antigüedad de la revisión: se hace una vez por día. |
+| `build.version` | Versión del exe que está corriendo (`git describe`): `"1.0.9"` en un tag, `"1.0.9-3-gabc1234"` en un commit posterior. Corriendo desde el código fuente, `"codigo fuente"`. |
+| `build.commit` | Commit con el que se generó, 7 caracteres. |
+| `build.dirty` / `build.dirtyFiles` | Si el exe se generó con cambios sin commitear, y cuáles. En un exe de una release siempre es `false` y `[]`. |
+| `build.python` / `build.runtimePython` | Python con que se generó el exe y con el que está corriendo (en un exe son el mismo). Importa porque no todas las versiones validan TLS igual: los exe con Python 3.11 y con 3.13 no rechazan los mismos certificados — ver [`certificado_vencido.md`](certificado_vencido.md) §2.3. |
+| `build.builtAt` / `build.builder` | Cuándo se generó (UTC) y dónde: `github-actions` si salió del workflow, o el nombre de la máquina. |
 
 > Los sensores que el equipo todavía no reportó **no aparecen** en `sensors`. No
 > se inventa un "desconocido" que taparía el dato real.

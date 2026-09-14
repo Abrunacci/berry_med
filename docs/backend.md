@@ -92,6 +92,35 @@ muestras, con el número por POST variando entre 1 y 250. Ahora llega el 100 %.
 Ya está contado en §0.3 — se menciona acá porque explica por qué el volumen
 sube más de lo que sugiere el cambio de 1 a 7 derivaciones.
 
+### 0.7 Dos campos del `/health` que hoy nadie lee: `certificates` y `build`
+
+Van en **todos** los reportes y **ninguno de los dos cambia `status`**: son
+avisos, no fallas de operación. Eso significa que si no se los mira
+explícitamente, nadie se entera nunca. Ejemplos en §5.1 y §5.4.
+
+- **`certificates`** — una vez por día el tótem revisa, en el almacén de
+  certificados de su propio Windows, los que sirven para validar la cadena de
+  este backend, y avisa de los vencidos o que vencen en menos de 30 días
+  (`certificates.warnings`, con `daysLeft` y `expired`). Viene de un incidente
+  real: varios tótems dejaron de postear el día que un certificado vencido pasó
+  a decidir la validación, y nadie lo supo hasta que fallaron. Un exe 1.0.9 o
+  posterior ya no se cae por un intermedio vencido —valida con el motor de
+  Windows—, pero una **raíz** que vence sí corta la conexión, y este aviso es la
+  única señal con 30 días de anticipación.
+- **`build`** — qué exe está corriendo ese tótem: `build.version` (por ejemplo
+  `"1.0.9"`) y `build.commit`. Hoy, para saber qué versión tiene un tótem, hay
+  que entrar al equipo o preguntárselo a quien esté en el sitio.
+
+Lo mínimo a implementar, en orden de valor:
+
+1. Guardar los dos campos junto al reporte.
+2. Alertar si `certificates.warnings` trae algo: `expired: true` es urgente,
+   `daysLeft` entre 0 y 30 es para planificar una visita.
+3. Poder listar *tótem → `build.version`*, para ver de un vistazo quién quedó
+   con un exe viejo.
+4. Avisar si `certificates.checked` es `false` con un `error` distinto de
+   `"sólo se revisa en Windows"`: significa que la revisión se está cayendo.
+
 ---
 
 ## 1. Panorama
@@ -356,7 +385,16 @@ De `tests/capturas/ocioso.bin`: todo enchufado, nadie puesto. **Es el estado del
   "disconnectedSensors": [],
   "expectedSensors": ["spo2", "temperature"],
   "sensorsWithoutPatient": ["ecg", "spo2"],
-  "session": { "active": false, "secondsElapsed": null }
+  "session": { "active": false, "secondsElapsed": null },
+  "certificates": {
+    "checked": true, "checkedSecondsAgo": 3598.2, "inspected": 2,
+    "warnDays": 30, "warnings": [], "error": null
+  },
+  "build": {
+    "name": "berry-monitor", "version": "1.0.9", "commit": "7f9904d",
+    "dirty": false, "dirtyFiles": [], "builtAt": "2026-09-14T14:08:11Z",
+    "python": "3.13.7", "builder": "github-actions", "runtimePython": "3.13.7"
+  }
 }
 ```
 
@@ -399,7 +437,32 @@ mide la temperatura con el termómetro USB IR:
 El estado se informa igual —`kind: "falla"`— pero con `expected: false` no mueve
 el estado general. **No alertar no es lo mismo que ocultar.**
 
-### 5.4 Qué mirar del lado del backend
+### 5.4 Un certificado del tótem por vencer
+
+Mismo tótem sano, pero con el cruce viejo de Let's Encrypt todavía guardado en
+su Windows. **El `status` sigue en `ok`** y el reporte llegó: es un aviso para ir
+a limpiar ese equipo, no una falla de operación.
+
+```json
+{
+  "status": "ok",
+  "certificates": {
+    "checked": true, "checkedSecondsAgo": 3598.2, "inspected": 2, "warnDays": 30,
+    "warnings": [
+      { "subject": "ISRG Root X2", "issuer": "ISRG Root X1", "stores": ["CA"],
+        "notAfter": "2025-09-15T16:00:00Z", "daysLeft": -364, "expired": true,
+        "sha1": "151682F5218C0A511C28F4060A73B9CA78CE9A53" }
+    ],
+    "error": null
+  }
+}
+```
+
+`warnings: []` con `checked: true` es información: se miró y no hay nada por
+vencer. Con `checked: false` no hubo revisión y el motivo va en `error` — por
+ejemplo `"sólo se revisa en Windows"` si el monitor corre en Linux.
+
+### 5.5 Qué mirar del lado del backend
 
 | Para saber… | Mirar |
 |---|---|
@@ -408,6 +471,8 @@ el estado general. **No alertar no es lo mismo que ocultar.**
 | Si llegan las órdenes | `pusher.connected` |
 | Si hay que mandar a alguien | `disconnectedSensors` no vacío |
 | Si hay una medición en curso | `session.active` |
+| Si a ese tótem se le está venciendo un certificado | `certificates.warnings` (`expired`, `daysLeft`) |
+| Qué exe tiene puesto | `build.version` y `build.commit` |
 
 ---
 
