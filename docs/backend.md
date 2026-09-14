@@ -1,4 +1,4 @@
-# Qué le manda el tótem al backend
+# Integración con el backend — datos que manda el tótem y endpoints que consume
 
 Contrato completo de lo que sale del tótem y lo que entra. Todos los ejemplos de
 este documento están generados a partir de capturas reales del equipo
