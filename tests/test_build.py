@@ -79,9 +79,12 @@ def test_las_dos_listas_de_sensores_vigilables_no_divergieron():
     a propósito: `config.py` lo usan los dos ejecutables y se lo mantiene sin
     dependencias de `src/`, para no arrastrar el protocolo al configurador. El
     precio es que pueden separarse, y esto es lo que lo impide."""
+    from config import SENSORES_POR_DEFECTO as defecto_config
     from config import SENSORES_VIGILABLES as en_config
+    from src.health import SENSORES_POR_DEFECTO as defecto_health
     from src.health import SENSORES_VIGILABLES as en_health
     assert tuple(en_config) == tuple(en_health)
+    assert tuple(defecto_config) == tuple(defecto_health)
 
 
 def test_el_pyproject_pide_el_mismo_python_que_el_build():

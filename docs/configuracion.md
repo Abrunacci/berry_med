@@ -96,16 +96,19 @@ La URL final queda `{API_URL}/{TOTEM_ID}/{API_ENDPOINT}`. Ver
 |---|---|---|
 | `HEALTH_ENDPOINT` | `health` | Último tramo de la URL de health. Cuelga de la misma base y el mismo Totem ID que las métricas. |
 | `HEALTH_INTERVAL_SECONDS` | `60` | Cada cuánto se reporta el estado. **`0` desactiva el reporte.** |
-| `HEALTH_EXPECTED_SENSORS` | `spo2,temperature` | Sondas que **este** tótem lleva puestas, separadas por coma. Sólo la desconexión de éstas pone el estado en `degraded`. Vacío = no vigilar ninguna. |
+| `HEALTH_EXPECTED_SENSORS` | `spo2,temperature` | Sondas que **este** tótem lleva puestas, separadas por coma: `spo2`, `temperature` (la sonda del Berry) y `usb_thermometer` (el termómetro USB aparte). Sólo la desconexión de éstas pone el estado en `degraded`. Vacío = no vigilar ninguna. |
 
 > **`HEALTH_EXPECTED_SENSORS` importa más de lo que parece.** Si el tótem mide la
 > temperatura con el termómetro USB y no tiene la sonda del Berry, el equipo la
 > informa desconectada **en cada paquete, para siempre**: dejar el default deja
 > el health en `degraded` de forma permanente. Ver §5.
 >
-> Sólo `spo2` y `temperature` se pueden vigilar — son las únicas dos
-> desconexiones que el protocolo del equipo transmite. Cualquier otro valor se
-> ignora con un aviso en el log.
+> Sólo `spo2`, `temperature` y `usb_thermometer` se pueden vigilar: las dos
+> primeras son las únicas desconexiones que el protocolo del equipo transmite, y
+> el termómetro USB se mide por su propio puerto. Cualquier otro valor se
+> ignora con un aviso en el log. `usb_thermometer` exige
+> `THERMOMETER_ENABLED=true`: el configurador no deja guardar la combinación
+> contraria.
 
 ### Pusher
 
@@ -195,11 +198,14 @@ La URL final queda `{API_URL}/{TOTEM_ID}/{API_ENDPOINT}`. Ver
 ### El tótem no tiene sonda de temperatura del Berry
 
 Mide con el termómetro USB IR. El equipo reporta la sonda desconectada
-permanentemente y el health quedaría en `degraded` para siempre:
+permanentemente y el health quedaría en `degraded` para siempre. Se saca
+`temperature` y se vigila el termómetro USB en su lugar:
 
 ```json
-{ "HEALTH_EXPECTED_SENSORS": "spo2" }
+{ "HEALTH_EXPECTED_SENSORS": "spo2,usb_thermometer" }
 ```
+
+En el configurador, "Sondas que tiene este tótem": `spo2,usb_thermometer`.
 
 ### El backend todavía no armó el `/health`
 

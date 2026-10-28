@@ -164,6 +164,10 @@ class VitalsMonitor:
                 status_callback=self.status_callback
             )
             self.thermometer_reader.start()
+        elif "usb_thermometer" in self.health.sensores_esperados:
+            print("[HEALTH][WARN] HEALTH_EXPECTED_SENSORS pide vigilar "
+                  "usb_thermometer pero THERMOMETER_ENABLED está en false: el "
+                  "health lo va a informar desconectado.")
 
     def _build_api_url(self, endpoint=None) -> str:
         """Arma `{API_URL}/{TOTEM_ID}/{endpoint}`.
@@ -342,7 +346,19 @@ class VitalsMonitor:
             session={"active": self.is_sending_data,
                      "secondsElapsed": transcurrido},
             certificates=self._certificados,
+            thermometer=self._thermometer_status(),
         )
+
+    def _thermometer_status(self):
+        """Estado del termómetro USB para el /health, o None si no se usa."""
+        if not self.thermometer_reader:
+            return None
+        try:
+            return self.thermometer_reader.link_status()
+        except Exception as e:
+            # Igual que con el Berry: el health tiene que salir igual.
+            return {"enabled": True, "connected": False,
+                    "error": f"{type(e).__name__}: {e}"}
 
     def connect_handler(self, data):
         """Handler for successful connection"""
