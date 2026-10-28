@@ -183,7 +183,7 @@ def test_el_objeto_trae_todo_lo_que_el_backend_espera(health, pusher_ok):
     foto = snapshot(health, pusher_ok)
     assert set(foto) == {
         "totemId", "status", "uptimeSeconds", "device", "pusher", "sensors",
-        "disconnectedSensors", "expectedSensors", "sensorsWithoutPatient",
+        "disconnectedSensors", "expectedSensors", "sensorsWithoutPatient", "thermometer",
         "session", "certificates", "build",
     }
 
@@ -282,6 +282,68 @@ def test_se_pueden_apagar_todas_las_alertas_de_sensor(parser, reloj, pusher_ok):
                              session={"active": False, "secondsElapsed": None})
     assert foto["status"] == "ok"
     assert foto["expectedSensors"] == []
+
+
+# --- Termómetro USB ---------------------------------------------------------
+
+def termometro(conectado=True, edad=None):
+    return {"enabled": True, "port": "COM5", "connected": conectado,
+            "portOpen": conectado, "readerAlive": True,
+            "lastReadingSecondsAgo": edad, "error": None}
+
+
+def foto_con_termometro(parser, pusher, esperados, estado_termometro):
+    reporter = HealthReporter("totem-01", parser, sensores_esperados=esperados)
+    return reporter.snapshot(device=enlace(), pusher=pusher,
+                             session={"active": False, "secondsElapsed": None},
+                             thermometer=estado_termometro)
+
+
+def test_un_termometro_usb_vigilado_que_no_abre_degrada(parser, reloj, pusher_ok):
+    """El caso que motivó vigilarlo: el termómetro mal asignado de puerto no
+    llegaba al backend y el health no decía nada."""
+    foto = foto_con_termometro(parser, pusher_ok, {"spo2", "usb_thermometer"},
+                               termometro(conectado=False))
+    assert foto["status"] == "degraded"
+    assert foto["disconnectedSensors"] == ["usb_thermometer"]
+    assert foto["thermometer"]["expected"] is True
+
+
+def test_un_termometro_usb_conectado_sin_lecturas_esta_ok(parser, reloj, pusher_ok):
+    """El termómetro sólo transmite cuando alguien se mide: un tótem ocioso
+    no tiene lecturas, y eso no es una falla."""
+    foto = foto_con_termometro(parser, pusher_ok, {"spo2", "usb_thermometer"},
+                               termometro(conectado=True, edad=None))
+    assert foto["status"] == "ok"
+    assert foto["disconnectedSensors"] == []
+
+
+def test_un_termometro_usb_no_vigilado_se_informa_pero_no_degrada(parser, reloj, pusher_ok):
+    foto = foto_con_termometro(parser, pusher_ok, {"spo2"}, termometro(conectado=False))
+    assert foto["status"] == "ok"
+    assert foto["thermometer"]["connected"] is False
+    assert foto["thermometer"]["expected"] is False
+
+
+def test_un_termometro_vigilado_que_la_app_no_arranco_cuenta_como_desconectado(
+        parser, reloj, pusher_ok):
+    """La config dice que el tótem lo tiene. Si no está habilitado, alguien
+    se olvidó de algo, y el health tiene que decirlo."""
+    foto = foto_con_termometro(parser, pusher_ok, {"usb_thermometer"}, None)
+    assert foto["status"] == "degraded"
+    assert foto["thermometer"]["enabled"] is False
+
+
+def test_la_sonda_del_berry_y_el_termometro_salen_juntos_y_ordenados(parser, reloj, pusher_ok):
+    parser.add_data(temp_params(status=0x01))
+    foto = foto_con_termometro(parser, pusher_ok, {"temperature", "usb_thermometer"},
+                               termometro(conectado=False))
+    assert foto["disconnectedSensors"] == ["temperature", "usb_thermometer"]
+
+
+def test_sin_termometro_el_objeto_lo_dice(health, pusher_ok):
+    assert snapshot(health, pusher_ok)["thermometer"] == {
+        "enabled": False, "port": None, "connected": False, "expected": False}
 
 
 # --- Certificados del tótem -------------------------------------------------

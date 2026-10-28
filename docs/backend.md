@@ -121,6 +121,17 @@ Lo mínimo a implementar, en orden de valor:
 4. Avisar si `certificates.checked` es `false` con un `error` distinto de
    `"sólo se revisa en Windows"`: significa que la revisión se está cayendo.
 
+### 0.8 El `/health` ahora informa el termómetro USB: `thermometer`
+
+Hasta ahora el termómetro USB IR no aparecía en el health. Con el puerto mal
+asignado, su temperatura no llegaba a las métricas y el tótem seguía en `ok`.
+Ahora viaja un bloque `thermometer` en **todos** los reportes (`enabled: false`
+si el tótem no lo usa), y si el tótem lo pide como `usb_thermometer` en
+`HEALTH_EXPECTED_SENSORS`, un puerto que no abre aparece en
+`disconnectedSensors` y baja el estado a `degraded`, como una sonda. Para el
+backend que ya alerta por `disconnectedSensors` no hay nada que cambiar: el
+valor nuevo es `"usb_thermometer"`. Ejemplos en §5.3 y §5.3.1.
+
 ---
 
 ## 1. Panorama
@@ -385,6 +396,7 @@ De `tests/capturas/ocioso.bin`: todo enchufado, nadie puesto. **Es el estado del
   "disconnectedSensors": [],
   "expectedSensors": ["spo2", "temperature"],
   "sensorsWithoutPatient": ["ecg", "spo2"],
+  "thermometer": { "enabled": false, "port": null, "connected": false, "expected": false },
   "session": { "active": false, "secondsElapsed": null },
   "certificates": {
     "checked": true, "checkedSecondsAgo": 3598.2, "inspected": 2,
@@ -420,8 +432,9 @@ tiene que ir a enchufar algo.
 
 ### 5.3 Una sonda que este tótem no lleva
 
-Mismo tótem ocioso, pero configurado con `HEALTH_EXPECTED_SENSORS=spo2` porque
-mide la temperatura con el termómetro USB IR:
+Mismo tótem ocioso, pero configurado con
+`HEALTH_EXPECTED_SENSORS=spo2,usb_thermometer` porque mide la temperatura con el
+termómetro USB IR:
 
 ```json
 {
@@ -429,13 +442,40 @@ mide la temperatura con el termómetro USB IR:
   "sensors": {
     "temperature": { "status": "t1_desconectado", "kind": "falla", "expected": false }
   },
+  "thermometer": {
+    "enabled": true, "port": "COM5", "connected": true, "portOpen": true,
+    "readerAlive": true, "lastReadingSecondsAgo": null, "error": null,
+    "expected": true
+  },
   "disconnectedSensors": [],
-  "expectedSensors": ["spo2"]
+  "expectedSensors": ["spo2", "usb_thermometer"]
 }
 ```
 
 El estado se informa igual —`kind: "falla"`— pero con `expected: false` no mueve
 el estado general. **No alertar no es lo mismo que ocultar.**
+
+`lastReadingSecondsAgo: null` tampoco es una alerta: el termómetro sólo
+transmite cuando alguien se mide.
+
+### 5.3.1 El termómetro USB con el puerto mal asignado
+
+Mismo tótem, con `THERMOMETER_PORT` apuntando a un COM que no existe. La
+temperatura del termómetro no llega a las métricas, y ahora el health lo dice:
+
+```json
+{
+  "status": "degraded",
+  "thermometer": {
+    "enabled": true, "port": "COM5", "connected": false, "portOpen": false,
+    "readerAlive": true, "lastReadingSecondsAgo": null,
+    "error": "SerialException: could not open port 'COM5': FileNotFoundError(2, 'El sistema no puede encontrar el archivo especificado.', None, 2)",
+    "expected": true
+  },
+  "disconnectedSensors": ["usb_thermometer"],
+  "expectedSensors": ["spo2", "usb_thermometer"]
+}
+```
 
 ### 5.4 Un certificado del tótem por vencer
 
@@ -470,6 +510,7 @@ ejemplo `"sólo se revisa en Windows"` si el monitor corre en Linux.
 | Si el Berry está enganchado | `device.dataFresh` (no `device.connected` solo) |
 | Si llegan las órdenes | `pusher.connected` |
 | Si hay que mandar a alguien | `disconnectedSensors` no vacío |
+| Si el termómetro USB está enganchado | `thermometer.connected`, y `thermometer.error` si no |
 | Si hay una medición en curso | `session.active` |
 | Si a ese tótem se le está venciendo un certificado | `certificates.warnings` (`expired`, `daysLeft`) |
 | Qué exe tiene puesto | `build.version` y `build.commit` |

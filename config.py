@@ -62,15 +62,21 @@ def get_app_data_path() -> Path:
 DEFAULT_API_ENDPOINT = "metrics"
 DEFAULT_HEALTH_ENDPOINT = "health"
 
-# Sondas cuya desconexión el equipo sabe informar, y por lo tanto lo único que
-# el /health puede vigilar. Del ECG y del NIBP el protocolo no manda ninguna
+# Lo único que el /health puede vigilar: las dos sondas cuya desconexión el
+# equipo sabe informar, más el termómetro USB, que no pasa por el equipo y se
+# mide por su propio puerto. Del ECG y del NIBP el protocolo no manda ninguna
 # señal de "cable desenchufado". Ver src/health.py y docs/health.md.
 #
 # Está repetida en `src/health.py` a propósito: este archivo lo importan los dos
 # ejecutables y se lo mantiene sin dependencias de `src/`, para no arrastrar el
 # protocolo entero al configurador. El riesgo de que las dos copias se separen
 # lo cubre `tests/test_build.py`.
-SENSORES_VIGILABLES = ("spo2", "temperature")
+SENSORES_VIGILABLES = ("spo2", "temperature", "usb_thermometer")
+
+# Lo que se vigila si la clave no está. Es lo que había antes de que se pudiera
+# vigilar el termómetro USB: un tótem que se actualiza sin tocar la config no
+# puede empezar a alertar por un dispositivo que quizás no tiene.
+SENSORES_POR_DEFECTO = ("spo2", "temperature")
 
 
 def parse_sensores_esperados(valor, log=print):
@@ -82,12 +88,13 @@ def parse_sensores_esperados(valor, log=print):
     tótem así queda en `degraded` para siempre — el mismo ruido permanente que
     ya nos había pasado con el "no finger" del SpO2.
 
-    Ausente  -> se vigilan todas (comportamiento anterior; avisa de más, no de
-                menos, que es el lado seguro para equipar un tótem nuevo).
+    Ausente  -> se vigilan las dos sondas del equipo (comportamiento anterior;
+                avisa de más, no de menos, que es el lado seguro para equipar
+                un tótem nuevo). El termómetro USB se vigila sólo si se pide.
     Vacío    -> no se vigila ninguna.
     """
     if valor is None:
-        return set(SENSORES_VIGILABLES)
+        return set(SENSORES_POR_DEFECTO)
 
     pedidos = [s.strip().lower() for s in str(valor).split(",")]
     pedidos = [s for s in pedidos if s]
@@ -95,7 +102,7 @@ def parse_sensores_esperados(valor, log=print):
     desconocidos = [s for s in pedidos if s not in SENSORES_VIGILABLES]
     if desconocidos:
         log(f"[HEALTH][WARN] HEALTH_EXPECTED_SENSORS: {desconocidos} no se "
-            f"pueden vigilar (el equipo no informa su desconexión). "
+            f"pueden vigilar (no hay forma de detectar su desconexión). "
             f"Válidos: {list(SENSORES_VIGILABLES)}. Se ignoran.")
 
     return {s for s in pedidos if s in SENSORES_VIGILABLES}
