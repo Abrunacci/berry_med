@@ -81,7 +81,7 @@ See [About the SSL Certificate](#about-the-ssl-certificate) for instructions.
 ## 🔄 How It Works
 
 - The application subscribes to a public Pusher channel.
-- It listens for `start-monitoring` and `stop-monitoring` events.
+- It listens for `start-monitoring` and `stop-monitoring` events, and for `start-sensor` / `stop-sensor` to turn sensors on and off one by one (see `docs/backend.md` §6.2).
 - While monitoring is active, vital signs are sent via HTTP POST to your configured API endpoint using Basic Auth.
 - Temperature appears only under `data.vitalSigns.temperature` (no separate `thermometer` field in the payload).
 

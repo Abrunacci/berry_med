@@ -163,7 +163,7 @@ algo que se pueda agregar después — el protocolo no lo transmite.
   "disconnectedSensors": [],
   "expectedSensors": ["spo2"],
   "sensorsWithoutPatient": ["ecg", "spo2"],
-  "session": { "active": false, "secondsElapsed": null },
+  "session": { "active": false, "secondsElapsed": null, "sensors": [] },
   "certificates": {
     "checked": true,
     "checkedSecondsAgo": 3598.2,
@@ -216,6 +216,7 @@ algo que se pueda agregar después — el protocolo no lo transmite.
 | `expectedSensors` | Qué sondas se vigilan acá. Permite distinguir "no hay alerta" de "no se está mirando". |
 | `sensorsWithoutPatient` | Conectadas pero sin nadie puesto. Informativo. |
 | `session.active` | Si hay una sesión de medición en curso. |
+| `session.sensors` | Sensores prendidos en la sesión (`ecg`, `resp`, `spo2`, `temperature`, `nibp`). Vacío sin sesión. Ver `backend.md` §6.2. |
 | `certificates.warnings` | Certificados de la cadena del backend, guardados en el tótem, vencidos o que vencen en menos de `warnDays` días. **Es un aviso**: no cambia `status`. Ver §6. |
 | `certificates.warnings[].daysLeft` | Días que le quedan. Negativo = vencido hace esos días (`expired: true`). |
 | `certificates.warnings[].stores` | En qué almacén de Windows está: `CA` (intermedios) o `ROOT` (raíces). |

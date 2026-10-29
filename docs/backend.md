@@ -385,7 +385,7 @@ De `tests/capturas/ocioso.bin`: todo enchufado, nadie puesto. **Es el estado del
   "disconnectedSensors": [],
   "expectedSensors": ["spo2", "temperature"],
   "sensorsWithoutPatient": ["ecg", "spo2"],
-  "session": { "active": false, "secondsElapsed": null },
+  "session": { "active": false, "secondsElapsed": null, "sensors": [] },
   "certificates": {
     "checked": true, "checkedSecondsAgo": 3598.2, "inspected": 2,
     "warnDays": 30, "warnings": [], "error": null
@@ -478,18 +478,21 @@ ejemplo `"sólo se revisa en Windows"` si el monitor corre en Linux.
 
 ## 6. Lo que el tótem escucha: eventos de Pusher
 
-El tótem se suscribe al canal `PUBLIC_CHANNEL` y escucha tres eventos:
+El tótem se suscribe al canal `PUBLIC_CHANNEL` y escucha cinco eventos:
 
 | Evento | Nombre | Qué hace |
 |---|---|---|
 | Arranque | `START_EVENT_NAME` (default `start-monitoring`) | Limpia el estado de la sesión anterior y empieza a postear métricas. |
 | Parada | `STOP_EVENT_NAME` (default `stop-monitoring`) | Corta el envío y limpia. |
 | Presión | **`start-blood-pressure`** (fijo) | Borra la presión anterior y le pide al equipo una medición nueva. |
+| Prender sensor | **`start-sensor`** (fijo) | Suma sensores a la sesión en curso; si no hay sesión, arranca una sólo con ellos. Ver §6.2. |
+| Apagar sensor | **`stop-sensor`** (fijo) | Saca sensores de la sesión; si no queda ninguno, la cierra como el stop. Ver §6.2. |
 
-Los dos primeros tienen el nombre configurable; **el de presión está fijo en el
-código** (`app.py`), no se configura.
+Los dos primeros tienen el nombre configurable; **los otros tres están fijos en
+el código** (`app.py`), no se configuran.
 
-No se lee el contenido del evento: alcanza con que llegue.
+De `start-monitoring`, `stop-monitoring` y `start-blood-pressure` no se lee el
+contenido: alcanza con que llegue.
 
 ### 6.1 Por qué el `start` limpia
 
@@ -500,6 +503,44 @@ una medición nueva podría llevarse datos de la anterior.
 Por la misma razón existe `MAX_SESSION_MINUTES`: si el `stop` nunca llega, la
 sesión se corta sola pasado ese tope. Sin eso el tótem postea una vez por segundo
 para siempre. `0` desactiva el corte.
+
+### 6.2 Sensores uno por uno
+
+`start-monitoring` sigue arrancando la sesión con **todos** los sensores, igual
+que antes. Para prender y apagar de a uno están `start-sensor` y `stop-sensor`,
+que sí leen el contenido del evento:
+
+```json
+{ "sensor": "spo2" }
+{ "sensors": ["spo2", "temperature"] }
+```
+
+Sensores válidos:
+
+| Sensor | Qué cubre en el payload |
+|---|---|
+| `ecg` | `ecg`, `ecgPeaks`, `ecgInfo`, `vitalSigns.heartRate` |
+| `resp` | `resp`, `vitalSigns.respRate` |
+| `spo2` | `spo2`, `vitalSigns.spo2Pulse` |
+| `temperature` | `vitalSigns.temperature` (sonda del Berry y termómetro USB) |
+| `nibp` | `vitalSigns.nibp` |
+
+Un nombre desconocido se ignora y queda en el log.
+
+Es un filtro del lado del tótem: el Berry sigue midiendo todo y lo que no está
+prendido sale **vacío**, con los mismos valores que cuando no hay medición
+(`"- -"`, `"- - /- -"`, listas vacías, `ecgInfo` en `null`). La forma del
+payload no cambia.
+
+Reglas:
+
+- `start-sensor` sin sesión arranca una con la misma limpieza que el
+  `start-monitoring`. Con sesión, sólo suma sensores, no limpia nada.
+- `stop-sensor` del último sensor prendido cierra la sesión.
+- `start-blood-pressure` con sesión prende `nibp` solo, para que el resultado
+  no salga blanqueado.
+- `stop-monitoring` y el tope de `MAX_SESSION_MINUTES` cortan todo, como antes.
+- El /health informa los prendidos en `session.sensors`.
 
 ---
 

@@ -15,6 +15,7 @@ from src.cert_check import REINTENTO_SEG, REVISION_SEG, revisar_certificados
 from src.data_parser import BMDataParser
 from src.logging_setup import setup as setup_logging
 from src.health import HealthReporter
+from src.sensor_selection import ALL_SENSORS, filter_payload, parse_sensor_event
 from src.ssl_context import get_ssl_context
 from src.thermometer_reader import ThermometerReader
 
@@ -133,6 +134,10 @@ class VitalsMonitor:
             float(self.credentials.get("max_session_minutes", 30)) * 60
         )
         self._sending_since = None  # monotonic() del start; None = sin sesión
+        # Sensores que viajan en el payload. Se reemplaza entero (nunca se muta)
+        # porque lo escriben los handlers de Pusher desde su hilo y lo lee
+        # `send_data()` desde el loop. Ver src/sensor_selection.py.
+        self.active_sensors = ALL_SENSORS
 
         # Bind connection handlers for the client
         self.pusher_subscriber.connection.bind(
@@ -340,7 +345,9 @@ class VitalsMonitor:
             device=device,
             pusher=self.pusher_subscriber,
             session={"active": self.is_sending_data,
-                     "secondsElapsed": transcurrido},
+                     "secondsElapsed": transcurrido,
+                     "sensors": (sorted(self.active_sensors)
+                                 if self.is_sending_data else [])},
             certificates=self._certificados,
         )
 
@@ -353,6 +360,8 @@ class VitalsMonitor:
                 channel.bind(self.start_event_name, self.handle_start_event)
                 channel.bind(self.stop_event_name, self.handle_stop_event)
                 channel.bind('start-blood-pressure', self.handle_blood_pressure_event)
+                channel.bind('start-sensor', self.handle_start_sensor_event)
+                channel.bind('stop-sensor', self.handle_stop_sensor_event)
                 print(f"[DEBUG] Successfully subscribed to {self.public_channel}")
             else:
                 print("[ERROR] Failed to subscribe to channel")
@@ -401,8 +410,20 @@ class VitalsMonitor:
         """Corta el envío y deja todo limpio. Único camino de cierre."""
         self.is_sending_data = False
         self._sending_since = None
+        self.active_sensors = ALL_SENSORS
         self._reset_session_state()
         print(f"[DEBUG] Stopped data transmission ({reason})")
+
+    def _start_session(self, sensors):
+        """Arranca una sesión nueva con `sensors`. Único camino de arranque."""
+        # Limpiar ANTES de habilitar el envío, para que el primer POST de
+        # la medición nueva no pueda llevarse nada de la anterior. Va acá y
+        # no sólo en el stop porque el stop puede no llegar nunca: pestaña
+        # cerrada, Pusher caído, la app del otro lado reiniciando.
+        self._reset_session_state()
+        self.active_sensors = frozenset(sensors)
+        self._sending_since = time.monotonic()
+        self.is_sending_data = True
 
     def _session_expired(self) -> bool:
         """True si la sesión superó el tope sin que llegara el stop."""
@@ -413,13 +434,7 @@ class VitalsMonitor:
     def handle_start_event(self, event_data):
         """Handle the start monitoring event"""
         try:
-            # Limpiar ANTES de habilitar el envío, para que el primer POST de
-            # la medición nueva no pueda llevarse nada de la anterior. Va acá y
-            # no sólo en el stop porque el stop puede no llegar nunca: pestaña
-            # cerrada, Pusher caído, la app del otro lado reiniciando.
-            self._reset_session_state()
-            self._sending_since = time.monotonic()
-            self.is_sending_data = True
+            self._start_session(ALL_SENSORS)
             print("[DEBUG] Starting data transmission")
         except Exception as e:
             print(f"[ERROR] Error processing start event: {e}")
@@ -431,10 +446,50 @@ class VitalsMonitor:
         except Exception as e:
             print(f"[ERROR] Error processing stop event: {e}")
 
+    def handle_start_sensor_event(self, event_data):
+        """Suma sensores a la sesión, o arranca una sólo con ellos."""
+        try:
+            sensors, unknown = parse_sensor_event(event_data)
+            if unknown:
+                print(f"[WARN] start-sensor: sensores desconocidos {unknown}; "
+                      f"válidos: {sorted(ALL_SENSORS)}")
+            if not sensors:
+                print(f"[WARN] start-sensor sin sensores válidos: {event_data!r}")
+                return
+            if self.is_sending_data:
+                self.active_sensors = self.active_sensors | sensors
+            else:
+                self._start_session(sensors)
+            print(f"[DEBUG] Sensores activos: {sorted(self.active_sensors)}")
+        except Exception as e:
+            print(f"[ERROR] Error processing start-sensor event: {e}")
+
+    def handle_stop_sensor_event(self, event_data):
+        """Saca sensores de la sesión. Sin ninguno, la sesión se cierra."""
+        try:
+            sensors, unknown = parse_sensor_event(event_data)
+            if unknown:
+                print(f"[WARN] stop-sensor: sensores desconocidos {unknown}; "
+                      f"válidos: {sorted(ALL_SENSORS)}")
+            if not sensors or not self.is_sending_data:
+                return
+            remaining = self.active_sensors - sensors
+            if not remaining:
+                self._stop_session("stop-sensor del último sensor")
+                return
+            self.active_sensors = remaining
+            print(f"[DEBUG] Sensores activos: {sorted(self.active_sensors)}")
+        except Exception as e:
+            print(f"[ERROR] Error processing stop-sensor event: {e}")
+
     def handle_blood_pressure_event(self, event_data):
         """Handle the start blood pressure measurement event"""
         try:
             print("[DEBUG] Starting blood pressure measurement")
+            # Pedir una presión es pedir que se publique: si la sesión arrancó
+            # con start-sensor sin nibp, el resultado se blanquearía.
+            if self.is_sending_data:
+                self.active_sensors = self.active_sensors | {"nibp"}
             # Limpiar la presión anterior ANTES de arrancar. Mientras el
             # manguito infla, el equipo manda el 0x03 con sistólica y
             # diastólica en cero, y el parser no pisa el valor con ceros: sin
@@ -479,6 +534,7 @@ class VitalsMonitor:
                     # POST siguiente en vez de perderse. Ver su docstring.
                     data = self.data_parser.tomar_payload()
                     self._apply_thermometer_temperature(data)
+                    filter_payload(data, self.active_sensors)
                     if not self._is_valid_data(data):
                         await asyncio.sleep(1)
                         continue
