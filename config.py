@@ -62,42 +62,46 @@ def get_app_data_path() -> Path:
 DEFAULT_API_ENDPOINT = "metrics"
 DEFAULT_HEALTH_ENDPOINT = "health"
 
-# Lo único que el /health puede vigilar: las dos sondas cuya desconexión el
-# equipo sabe informar, más el termómetro USB, que no pasa por el equipo y se
-# mide por su propio puerto. Del ECG y del NIBP el protocolo no manda ninguna
-# señal de "cable desenchufado". Ver src/health.py y docs/health.md.
+# Lo único que el /health puede vigilar: el SpO2, cuya desconexión el equipo
+# sabe informar, y la temperatura, que es el termómetro USB y se mide por su
+# propio puerto (la sonda del Berry ya no se usa). Del ECG y del NIBP el
+# protocolo no manda ninguna señal de "cable desenchufado". Ver src/health.py y
+# docs/health.md.
 #
 # Está repetida en `src/health.py` a propósito: este archivo lo importan los dos
 # ejecutables y se lo mantiene sin dependencias de `src/`, para no arrastrar el
 # protocolo entero al configurador. El riesgo de que las dos copias se separen
 # lo cubre `tests/test_build.py`.
-SENSORES_VIGILABLES = ("spo2", "temperature", "usb_thermometer")
+SENSORES_VIGILABLES = ("spo2", "temperature")
 
-# Lo que se vigila si la clave no está. Es lo que había antes de que se pudiera
-# vigilar el termómetro USB: un tótem que se actualiza sin tocar la config no
-# puede empezar a alertar por un dispositivo que quizás no tiene.
+# Lo que se vigila si la clave no está.
 SENSORES_POR_DEFECTO = ("spo2", "temperature")
+
+# Nombres viejos que se siguen aceptando: `usb_thermometer` era el termómetro
+# USB en la 1.0.10, cuando `temperature` todavía era la sonda del Berry. Un
+# tótem configurado con `spo2,usb_thermometer` sigue vigilando lo mismo.
+SINONIMOS = {"usb_thermometer": "temperature"}
 
 
 def parse_sensores_esperados(valor, log=print):
     """Lista de sondas que ESTE tótem tiene puestas, desde la config.
 
-    No todos los tótems llevan las mismas: el sensor de temperatura del Berry
-    no se conecta cuando la temperatura la mide el termómetro USB IR aparte, y
-    el equipo informa esa ausencia de forma permanente. Sin esta lista, un
-    tótem así queda en `degraded` para siempre — el mismo ruido permanente que
-    ya nos había pasado con el "no finger" del SpO2.
-
-    Ausente  -> se vigilan las dos sondas del equipo (comportamiento anterior;
-                avisa de más, no de menos, que es el lado seguro para equipar
-                un tótem nuevo). El termómetro USB se vigila sólo si se pide.
+    Ausente  -> se vigilan el SpO2 y la temperatura (el termómetro USB).
     Vacío    -> no se vigila ninguna.
+
+    Los nombres viejos (`SINONIMOS`) se traducen, con un aviso en el log.
     """
     if valor is None:
         return set(SENSORES_POR_DEFECTO)
 
     pedidos = [s.strip().lower() for s in str(valor).split(",")]
     pedidos = [s for s in pedidos if s]
+
+    viejos = sorted({s for s in pedidos if s in SINONIMOS})
+    if viejos:
+        log(f"[HEALTH][WARN] HEALTH_EXPECTED_SENSORS: {viejos} está en desuso; "
+            f"se toma como {[SINONIMOS[s] for s in viejos]}.")
+    pedidos = [SINONIMOS.get(s, s) for s in pedidos]
 
     desconocidos = [s for s in pedidos if s not in SENSORES_VIGILABLES]
     if desconocidos:

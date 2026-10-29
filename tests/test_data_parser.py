@@ -32,11 +32,11 @@ def test_parsea_una_trama_partida_entre_dos_lecturas(parser):
 
 
 def test_parsea_varias_tramas_de_una_sola_lectura(parser):
-    parser.add_data(spo2_params(spo2=95, pulso=70) + temp_params(temp=36.7)
+    parser.add_data(spo2_params(spo2=95, pulso=70) + nibp_params(sys=120, dia=80)
                     + ecg_params(hr=88, rr=14))
     vitales = parser.data["vitalSigns"]
     assert vitales["spo2Pulse"] == "95/70"
-    assert vitales["temperature"] == "36.7"
+    assert vitales["nibp"] == "120/80"
     assert vitales["heartRate"] == "88"
 
 
@@ -93,9 +93,18 @@ def test_con_los_dos_en_error_queda_el_centinela_de_sin_dato(parser):
     assert parser.data["vitalSigns"]["spo2Pulse"] == parser.NO_VALUE
 
 
-def test_la_temperatura_llega_partida_en_entero_y_decima(parser):
+def test_la_temperatura_del_berry_no_va_al_payload(parser):
+    """La sonda del Berry ya no se usa: la temperatura sale del termómetro USB.
+    Sin sonda puesta el equipo manda la ambiente o cero, y eso no puede viajar
+    como si fuera la del paciente."""
     parser.add_data(trama(0x05, 0x00, 36, 8))
-    assert parser.data["vitalSigns"]["temperature"] == "36.8"
+    assert parser.data["vitalSigns"]["temperature"] == "- -"
+
+
+def test_la_sonda_del_berry_igual_registra_su_estado(parser):
+    """El protocolo lo sigue informando; es el /health el que lo descarta."""
+    parser.add_data(temp_params(status=0x01))
+    assert parser.sensor_status["temperature"]["status"] == "t1_desconectado"
 
 
 def test_la_presion_no_se_pisa_mientras_el_equipo_infla(parser):

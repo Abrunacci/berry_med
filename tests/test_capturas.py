@@ -16,7 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from src.health import HealthReporter
-from tests.conftest import enlace
+from tests.conftest import enlace, termometro
 from tests.escenarios import ESCENARIOS, POR_ID
 
 
@@ -100,7 +100,8 @@ def test_un_totem_ocioso_de_verdad_no_dispara_ninguna_alerta(parser, captura, pu
     alimentar(parser, captura("ocioso"))
     foto = HealthReporter("totem-01", parser).snapshot(
         device=enlace(), pusher=pusher_ok,
-        session={"active": False, "secondsElapsed": None})
+        session={"active": False, "secondsElapsed": None},
+        thermometer=termometro())
     assert foto["disconnectedSensors"] == []
     assert foto["status"] == "ok"
 

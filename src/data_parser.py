@@ -358,9 +358,14 @@ class BMDataParser:
                 callback(package[4], spo2, pulse)
 
             elif callback_name == "on_temp_params_received":
+                # La sonda de temperatura del Berry ya no se usa: la temperatura
+                # sale del termómetro USB (la escribe la app sobre el payload).
+                # Su valor NO va a `vitalSigns` —sin sonda puesta, el equipo
+                # manda la ambiente o cero, y eso viajaba como si fuera la del
+                # paciente—. Su estado se sigue registrando porque es lo que
+                # informa el protocolo, pero el /health lo descarta (ver
+                # src/health.py).
                 temp = (package[5] * 10 + package[6]) / 10.0
-                temp_str = self._format_value(temp)
-                self.data["vitalSigns"]["temperature"] = temp_str
                 self._record_sensor("temperature", decode_temp_status(package[4]))
                 callback(package[4], temp)
 
