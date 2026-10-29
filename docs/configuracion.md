@@ -96,19 +96,19 @@ La URL final queda `{API_URL}/{TOTEM_ID}/{API_ENDPOINT}`. Ver
 |---|---|---|
 | `HEALTH_ENDPOINT` | `health` | Último tramo de la URL de health. Cuelga de la misma base y el mismo Totem ID que las métricas. |
 | `HEALTH_INTERVAL_SECONDS` | `60` | Cada cuánto se reporta el estado. **`0` desactiva el reporte.** |
-| `HEALTH_EXPECTED_SENSORS` | `spo2,temperature` | Sondas que **este** tótem lleva puestas, separadas por coma: `spo2`, `temperature` (la sonda del Berry) y `usb_thermometer` (el termómetro USB aparte). Sólo la desconexión de éstas pone el estado en `degraded`. Vacío = no vigilar ninguna. |
+| `HEALTH_EXPECTED_SENSORS` | `spo2,temperature` | Qué se vigila en **este** tótem, separado por coma: `spo2` y `temperature` (el termómetro USB). Sólo la desconexión de éstos pone el estado en `degraded`. Vacío = no vigilar ninguno. |
 
-> **`HEALTH_EXPECTED_SENSORS` importa más de lo que parece.** Si el tótem mide la
-> temperatura con el termómetro USB y no tiene la sonda del Berry, el equipo la
-> informa desconectada **en cada paquete, para siempre**: dejar el default deja
-> el health en `degraded` de forma permanente. Ver §5.
+> **La temperatura es la del termómetro USB.** La sonda de temperatura del Berry
+> ya no se usa: no se publica ni en las métricas ni en el health. Un tótem con
+> termómetro USB y la configuración por defecto da `ok`. Uno con
+> `THERMOMETER_ENABLED=false` informa `termometro_no_habilitado` y queda en
+> `degraded`, salvo que no mida temperatura y se configure `spo2` solo. Ver §5.
 >
-> Sólo `spo2`, `temperature` y `usb_thermometer` se pueden vigilar: las dos
-> primeras son las únicas desconexiones que el protocolo del equipo transmite, y
-> el termómetro USB se mide por su propio puerto. Cualquier otro valor se
-> ignora con un aviso en el log. `usb_thermometer` exige
-> `THERMOMETER_ENABLED=true`: el configurador no deja guardar la combinación
-> contraria.
+> Sólo `spo2` y `temperature` se pueden vigilar: el SpO₂ es la única
+> desconexión que el protocolo del equipo transmite, y el termómetro USB se mide
+> por su propio puerto. `usb_thermometer` (el nombre de la 1.0.10) se acepta como
+> sinónimo de `temperature`, con un aviso en el log. Cualquier otro valor se
+> ignora con un aviso.
 
 ### Pusher
 
@@ -195,17 +195,21 @@ La URL final queda `{API_URL}/{TOTEM_ID}/{API_ENDPOINT}`. Ver
 
 ## 5. Casos frecuentes
 
-### El tótem no tiene sonda de temperatura del Berry
+### El tótem no mide temperatura
 
-Mide con el termómetro USB IR. El equipo reporta la sonda desconectada
-permanentemente y el health quedaría en `degraded` para siempre. Se saca
-`temperature` y se vigila el termómetro USB en su lugar:
+Todos los tótems que miden temperatura llevan el termómetro USB IR, con
+`THERMOMETER_ENABLED=true`, y con la configuración por defecto no hay nada que
+tocar. Uno que no mide temperatura deja de vigilarla:
 
 ```json
-{ "HEALTH_EXPECTED_SENSORS": "spo2,usb_thermometer" }
+{ "HEALTH_EXPECTED_SENSORS": "spo2" }
 ```
 
-En el configurador, "Sondas que tiene este tótem": `spo2,usb_thermometer`.
+En el configurador, "Sondas que tiene este tótem": `spo2`. Sin esto, el health
+informa `termometro_no_habilitado` y queda en `degraded`.
+
+Un tótem configurado con `spo2,usb_thermometer` (lo que se recomendaba en la
+1.0.10) no necesita cambios: vigila lo mismo que `spo2,temperature`.
 
 ### El backend todavía no armó el `/health`
 

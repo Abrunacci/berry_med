@@ -54,7 +54,7 @@ This tool will prompt you to enter the required settings, which are saved to `%A
   - `THERMOMETER_ENABLED`: `true` or `false`  
   - `THERMOMETER_PORT`: separate COM port (e.g. `COM5`)  
   - `THERMOMETER_BAUD`: usually `115200`  
-  Temperature is sent in `vitalSigns.temperature` (Celsius). Thermometer data takes priority over Berry; if disabled or unavailable, Berry value is used (e.g. `"-"`).
+  Temperature is sent in `vitalSigns.temperature` (Celsius) and comes only from this thermometer: the Berry's own temperature probe is no longer used. Without a reading, it is sent as `"- -"`.
 
 - **Path to SSL Certificate (.pem)**  
   The certificate used to validate secure HTTPS requests.  
@@ -81,7 +81,7 @@ See [About the SSL Certificate](#about-the-ssl-certificate) for instructions.
 ## 🔄 How It Works
 
 - The application subscribes to a public Pusher channel.
-- It listens for `start-monitoring` and `stop-monitoring` events.
+- It listens for `start-monitoring` and `stop-monitoring` events, and for one event per instrument (`start-ecg`, `start-spo2`, `start-nibp`, `start-temperature`) that publishes only that instrument. See [`docs/backend.md`](docs/backend.md) §6.
 - While monitoring is active, vital signs are sent via HTTP POST to your configured API endpoint using Basic Auth.
 - Temperature appears only under `data.vitalSigns.temperature` (no separate `thermometer` field in the payload).
 

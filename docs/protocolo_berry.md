@@ -144,7 +144,9 @@ arranca en `False` y el loop de `send_data()` duerme hasta que llega.
 
 > ⚠️ El evento de presión arterial, **`start-blood-pressure`, está hardcodeado**
 > en `app.py` — a diferencia de arranque y parada, no se puede renombrar desde
-> la configuración.
+> la configuración. Lo mismo los de medición por instrumento (`start-ecg`,
+> `start-spo2`, `start-nibp`, `start-temperature`): ver
+> [`backend.md`](backend.md) §6.
 
 ### 2.2 Conexión con el equipo
 
@@ -158,7 +160,9 @@ arranca en `False` y el loop de `send_data()` duerme hasta que llega.
 | `THERMOMETER_RECONNECT_SECONDS` | `2.0` | Espera entre reintentos de reconexión |
 
 El termómetro es un dispositivo **aparte**: lo lee `ThermometerReader` en su
-propio hilo y su valor pisa `vitalSigns.temperature` justo antes de postear.
+propio hilo y su valor se escribe en `vitalSigns.temperature` justo antes de
+postear. Es la única fuente de temperatura: la sonda del Berry ya no se usa
+(§6.5).
 
 ### 2.3 Configuración del equipo (PM6750)
 
@@ -454,6 +458,11 @@ fallan los dos: `_is_valid_data()` lo usa para decidir si hay algo que postear.
 
 > ⚠️ El parser hace `(package[5] * 10 + package[6]) / 10.0`, que es la misma
 > cuenta, pero **sólo lee T1**: los bytes de T2 (`[7]`, `[8]`) se ignoran.
+
+> **La sonda de temperatura del Berry ya no se usa.** El paquete se sigue
+> decodificando y su estado queda en `sensor_status`, pero el valor no va a
+> `vitalSigns.temperature` (la temperatura sale del termómetro USB) y el
+> `/health` descarta su estado. Ver [`health.md`](health.md) §3.6.
 
 ### 6.6 `0x30` — marca de latido (QRS)
 

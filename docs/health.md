@@ -27,8 +27,9 @@ los sensores, e implementación en `src/health.py`.
   | 3 | ¿Llegan las órdenes del backend? | `pusher` |
   | 4 | ¿Las sondas están conectadas? | `disconnectedSensors` |
 
-  Las sondas incluyen el termómetro USB IR, que no pasa por el Berry: su
-  enlace se publica en `thermometer` (§3.6).
+  La temperatura es la del termómetro USB IR, que no pasa por el Berry: su
+  estado es `sensors.temperature` y su detalle va en `thermometer` (§3.6). La
+  sonda de temperatura del Berry ya no se usa.
 
 - Y agrega un aviso aparte, que no cambia el estado: si el tótem tiene
   certificados de la cadena del backend vencidos o por vencer
@@ -68,8 +69,7 @@ El manual separa las dos cosas explícitamente para el SpO₂ (pág. 12):
 
 **Sólo la primera es una falla.** La segunda es el estado normal de un tótem
 esperando al primer paciente: alertar por ella sería ruido permanente, todo el
-día. Lo mismo en temperatura, donde el manual usa la misma palabra
-(`T1 sensor off`).
+día.
 
 ### 3.1 Qué sirve como falla y qué no
 
@@ -78,7 +78,8 @@ día. Lo mismo en temperatura, donde el manual usa la misma palabra
 | SpO₂ | `sensor_desconectado` (`0x01`) | **Sí** | la sonda no está en el equipo |
 | SpO₂ | `sin_paciente` (`0x02`) | No | sonda puesta, nadie conectado |
 | SpO₂ | `buscando_pulso`, `busqueda_demasiado_larga` | No | en progreso |
-| Temperatura | `t1_desconectado`, `t2_desconectado`, `t1_y_t2_desconectados` | **Sí** | la sonda no está en el equipo |
+| Temperatura (termómetro USB) | `termometro_desconectado` | **Sí** | el puerto del termómetro no abre. Ver §3.6 |
+| Temperatura (termómetro USB) | `termometro_no_habilitado` | **Sí** | se vigila y `THERMOMETER_ENABLED` está en `false`. Ver §3.6 |
 | ECG | `electrodo_suelto` (BIT1) | No | ver 3.2 |
 | ECG | `senal_debil` (BIT0) | No | calidad de señal, no conexión |
 | NIBP | `manguito_flojo` y demás | No | resultado de una medición, no un estado |
@@ -94,58 +95,63 @@ distingue un cable desenchufado del equipo de un tótem ocioso.
 `manguito_flojo` es el resultado de una medición que salió mal, no un estado
 permanente del equipo, y sólo aparece si alguien pidió una medición.
 
-### 3.5 No todos los tótems llevan las mismas sondas
+### 3.5 Qué sensores se vigilan en este tótem
 
-Una falla sólo cuenta si esa sonda se usa en **este** tótem. El caso concreto:
-cuando la temperatura se mide con el termómetro USB IR, la sonda de temperatura
-del Berry no se conecta nunca, y el equipo informa `t1_desconectado` en cada
-paquete, de forma permanente. Sin esta condición ese tótem reporta `degraded`
-para siempre — el mismo ruido permanente que el "no finger" del SpO₂, y por la
-misma razón: una alerta que suena siempre no es una alerta.
+Una falla sólo cuenta si ese sensor se vigila en **este** tótem. Se declara en
+`HEALTH_EXPECTED_SENSORS` (§8): `spo2` y `temperature` (el termómetro USB). Son
+las únicas dos desconexiones que se pueden detectar (§3.4).
 
-Se declara en `HEALTH_EXPECTED_SENSORS` (§8). Sólo `spo2` y `temperature` se
-pueden vigilar: son las únicas dos desconexiones que el protocolo transmite
-(§3.4).
+El estado de un sensor no vigilado **se sigue publicando**, con `expected:
+false` al lado. No alertar no es lo mismo que ocultar.
 
-El estado de una sonda no vigilada **se sigue publicando**, con
-`expected: false` al lado. No alertar no es lo mismo que ocultar.
-
-Esto no se dedujo leyendo el código: apareció cuando las capturas del equipo
-real mostraron `t1_desconectado` en los cinco escenarios, incluido el que tenía
-un paciente puesto y todo lo demás sano.
-
-### 3.6 El termómetro USB
+### 3.6 La temperatura es el termómetro USB
 
 El termómetro USB IR no es una sonda del Berry: es otro dispositivo, en otro
-puerto (`THERMOMETER_PORT`), y el equipo no sabe nada de él. Hasta que se agregó
-este bloque el health no lo miraba en absoluto, así que un termómetro con el
-puerto mal asignado no llegaba al backend y el tótem seguía en `ok`. El caso
-apareció en un tótem real: "el health marca desconectado y el termómetro mide
-igual". Lo desconectado era la sonda del Berry; del termómetro no se sabía nada.
+puerto (`THERMOMETER_PORT`), y el equipo no sabe nada de él. **Es la única
+fuente de temperatura**: la sonda del Berry (PM6750) ya no se usa, y su estado
+se descarta aunque el equipo lo siga informando.
 
-Su enlace se publica en `thermometer`, con el mismo criterio que `device`:
-`connected` es **puerto abierto y hilo lector vivo**, medido, no un flag. Lo que
-no se puede usar es la antigüedad de la última lectura: el termómetro sólo
-transmite cuando alguien se mide, así que en un tótem ocioso `lastReadingSecondsAgo`
-puede ser de horas, o `null`, y eso es lo sano. Se publica igual, porque un
-puerto abierto que nunca dio una lectura puede ser otro dispositivo en ese COM.
+> **Cambió en esta versión.** Hasta la 1.0.10, `sensors.temperature` era la
+> sonda del Berry. En los tótems que miden con el termómetro USB esa sonda no
+> está conectada, el equipo la informa suelta en cada paquete, y el health daba
+> `degraded` con la configuración por defecto sobre un tótem que medía bien. La
+> 1.0.10 agregó el termómetro como `usb_thermometer` aparte; ahora es
+> directamente `temperature`.
 
-Para que su desconexión **alerte** hay que pedirlo en `HEALTH_EXPECTED_SENSORS`
-como `usb_thermometer`. Entonces, si el puerto no abre, aparece en
-`disconnectedSensors` y el estado pasa a `degraded`, igual que una sonda
-desenchufada. El motivo del último fallo va en `thermometer.error` (por ejemplo,
-`could not open port 'COM5'`).
+`sensors.temperature` sale del enlace del termómetro, con el mismo criterio que
+`device`: **puerto abierto y hilo lector vivo**, medido en el momento, no un
+flag. Por eso `secondsAgo` va siempre en `0` y `stale` en `false`.
 
-No entra en el default: un tótem que se actualiza sin tocar la config no puede
-empezar a alertar por un dispositivo que quizás no tiene. Si se pide
-`usb_thermometer` con `THERMOMETER_ENABLED=false`, cuenta como desconectado —la
-config dice que el tótem lo tiene— y el configurador no deja guardar esa
-combinación.
+| Situación | `status` | `kind` |
+|---|---|---|
+| Termómetro habilitado, puerto abierto | `ok` | `ok` |
+| Termómetro habilitado, el puerto no abre | `termometro_desconectado` | `falla` |
+| `THERMOMETER_ENABLED=false` | `termometro_no_habilitado` | `falla` |
+
+Sin termómetro habilitado es una falla si se vigila: todos los tótems que miden
+temperatura llevan el termómetro USB, así que alguien se olvidó de habilitarlo.
+Un tótem que no mide temperatura se configura con `HEALTH_EXPECTED_SENSORS=spo2`.
+
+Lo que no se puede usar es la antigüedad de la última lectura: el termómetro
+sólo transmite cuando alguien se mide, así que en un tótem ocioso
+`thermometer.lastReadingSecondsAgo` puede ser de horas, o `null`, y eso es lo
+sano.
+
+El bloque `thermometer` es el **detalle** de `sensors.temperature`: puerto,
+motivo del último fallo de apertura (`thermometer.error`, por ejemplo `could not
+open port 'COM5'`) y antigüedad de la última lectura. Su `expected` es el mismo
+que el de `sensors.temperature`, y un termómetro desconectado aparece **una sola
+vez** en `disconnectedSensors`, como `"temperature"`.
+
+`usb_thermometer` se sigue aceptando en `HEALTH_EXPECTED_SENSORS` como
+sinónimo de `temperature`, con un aviso en el log: un tótem configurado así
+tras la 1.0.10 sigue vigilando lo mismo, y en el reporte aparece como
+`"temperature"`.
 
 ### 3.4 Límite conocido
 
-**Las únicas dos fallas de sensor del equipo detectables son SpO₂ y
-temperatura** (más el termómetro USB, que no pasa por el equipo, §3.6). Si
+**Las únicas dos fallas de sensor detectables son el SpO₂ y la temperatura**
+(el termómetro USB, que no pasa por el equipo, §3.6). Si
 alguien desconecta el cable de ECG o el manguito del Berry, el `/health` no se
 entera: el equipo no informa nada que lo distinga de "no hay paciente". No es
 algo que se pueda agregar después — el protocolo no lo transmite.
@@ -182,6 +188,15 @@ algo que se pueda agregar después — el protocolo no lo transmite.
       "kind": "sin_paciente",
       "expected": true
     },
+    "temperature": {
+      "status": "ok",
+      "source": "usb_thermometer",
+      "port": "COM5",
+      "secondsAgo": 0.0,
+      "stale": false,
+      "kind": "ok",
+      "expected": true
+    },
     "ecg": {
       "status": "electrodo_suelto",
       "leadOff": true,
@@ -193,7 +208,7 @@ algo que se pueda agregar después — el protocolo no lo transmite.
     }
   },
   "disconnectedSensors": [],
-  "expectedSensors": ["spo2"],
+  "expectedSensors": ["spo2", "temperature"],
   "sensorsWithoutPatient": ["ecg", "spo2"],
   "thermometer": {
     "enabled": true,
@@ -203,9 +218,9 @@ algo que se pueda agregar después — el protocolo no lo transmite.
     "readerAlive": true,
     "lastReadingSecondsAgo": 1834.6,
     "error": null,
-    "expected": false
+    "expected": true
   },
-  "session": { "active": false, "secondsElapsed": null },
+  "session": { "active": false, "secondsElapsed": null, "measurement": null },
   "certificates": {
     "checked": true,
     "checkedSecondsAgo": 3598.2,
@@ -249,11 +264,13 @@ algo que se pueda agregar después — el protocolo no lo transmite.
 | `device.lastFrameSecondsAgo` | Antigüedad de la última trama. `null` = nunca llegó nada. **La señal que más importa.** |
 | `device.dataFresh` | `lastFrameSecondsAgo <= 5`. |
 | `pusher.state` | Estado crudo de pysher: distingue "conectando" de "se cayó". |
-| `sensors.<s>.status` | Último estado que informó el equipo. |
+| `sensors.<s>.status` | Último estado que informó el equipo. En `temperature`, el estado del termómetro USB (§3.6). |
+| `sensors.temperature.source` | Siempre `"usb_thermometer"`: de dónde sale la temperatura. |
+| `sensors.temperature.port` | Puerto del termómetro, o `null` si no está habilitado. |
 | `sensors.<s>.kind` | `falla` \| `sin_paciente` \| `ok` \| `info`. **Es el campo a mirar**: evita conocer las tablas del protocolo. |
 | `sensors.<s>.secondsAgo` | Antigüedad de ese estado. |
 | `sensors.<s>.stale` | `secondsAgo > 30`. Un estado viejo no describe la realidad. |
-| `sensors.<s>.expected` | Si este tótem lleva esa sonda. Con `false`, su desconexión se informa pero **no alerta**. Ver §3.5. |
+| `sensors.<s>.expected` | Si se vigila en este tótem. Con `false`, su desconexión se informa pero **no alerta**. Ver §3.5. |
 | `disconnectedSensors` | Sondas que este tótem usa y no están conectadas. **Esto sí es una alerta.** |
 | `expectedSensors` | Qué sondas se vigilan acá. Permite distinguir "no hay alerta" de "no se está mirando". |
 | `sensorsWithoutPatient` | Conectadas pero sin nadie puesto. Informativo. |
@@ -261,8 +278,9 @@ algo que se pueda agregar después — el protocolo no lo transmite.
 | `thermometer.connected` | Puerto del termómetro abierto **y** hilo lector vivo. Ver §3.6. |
 | `thermometer.lastReadingSecondsAgo` | Antigüedad de la última lectura válida. `null` = ninguna desde que arrancó. **No es una falla**: sólo transmite cuando alguien se mide. |
 | `thermometer.error` | Por qué no se pudo abrir el puerto, mientras no esté abierto. |
-| `thermometer.expected` | Si se vigila (`usb_thermometer` en `HEALTH_EXPECTED_SENSORS`). Con `true` y `connected: false`, aparece en `disconnectedSensors`. |
+| `thermometer.expected` | El mismo que `sensors.temperature.expected`. La desconexión se cuenta una sola vez, como `"temperature"`. |
 | `session.active` | Si hay una sesión de medición en curso. |
+| `session.measurement` | Qué se está midiendo: `"monitoring"` (todo, por `start-monitoring`), `"ecg"`, `"spo2"`, `"nibp"`, `"temperature"`, o `null` sin sesión. Ver [`backend.md`](backend.md) §6. |
 | `certificates.warnings` | Certificados de la cadena del backend, guardados en el tótem, vencidos o que vencen en menos de `warnDays` días. **Es un aviso**: no cambia `status`. Ver §6. |
 | `certificates.warnings[].daysLeft` | Días que le quedan. Negativo = vencido hace esos días (`expired: true`). |
 | `certificates.warnings[].stores` | En qué almacén de Windows está: `CA` (intermedios) o `ROOT` (raíces). |
@@ -276,7 +294,8 @@ algo que se pueda agregar después — el protocolo no lo transmite.
 | `build.builtAt` / `build.builder` | Cuándo se generó (UTC) y dónde: `github-actions` si salió del workflow, o el nombre de la máquina. |
 
 > Los sensores que el equipo todavía no reportó **no aparecen** en `sensors`. No
-> se inventa un "desconocido" que taparía el dato real.
+> se inventa un "desconocido" que taparía el dato real. `temperature` aparece
+> siempre: no depende del equipo.
 
 ---
 
@@ -299,11 +318,11 @@ operación, y no debería disparar la misma alarma que un tótem incomunicado.
 | Tótem ocioso, sin paciente | `ok` | — |
 | Paciente puesto, midiendo | `ok` | — |
 | Sonda de SpO₂ desenchufada | `degraded` | `disconnectedSensors: ["spo2"]` |
-| Sonda de temperatura desenchufada | `degraded` | `disconnectedSensors: ["temperature"]` |
-| Sonda de temperatura desenchufada, tótem sin esa sonda | `ok` | `sensors.temperature.expected: false` |
-| Termómetro USB vigilado, puerto que no abre | `degraded` | `disconnectedSensors: ["usb_thermometer"]`, motivo en `thermometer.error` |
-| Termómetro USB vigilado, abierto, sin lecturas | `ok` | `thermometer.lastReadingSecondsAgo: null` — nadie se midió |
-| Termómetro USB no vigilado, puerto que no abre | `ok` | `thermometer.connected: false` con `expected: false` |
+| Termómetro USB conectado, config por defecto, sonda del Berry ausente | `ok` | — la sonda del Berry ya no se mira |
+| Termómetro USB, puerto que no abre | `degraded` | `disconnectedSensors: ["temperature"]`, motivo en `thermometer.error` |
+| Termómetro USB abierto, sin lecturas | `ok` | `thermometer.lastReadingSecondsAgo: null` — nadie se midió |
+| Sin termómetro habilitado, config por defecto | `degraded` | `sensors.temperature.status: "termometro_no_habilitado"` |
+| Sin termómetro habilitado, `HEALTH_EXPECTED_SENSORS=spo2` | `ok` | `sensors.temperature.expected: false` |
 | Manguito flojo | `ok` | resultado clínico, no falla |
 | Hilo lector muerto | `down` | `readerAlive: false` |
 | Enlace mudo hace 30 s | `down` | `dataFresh: false` con `connected: true` |
@@ -371,18 +390,14 @@ puede tumbar el monitoreo.
 |---|---|---|
 | `HEALTH_ENDPOINT` | `health` | Último tramo de la URL. Cuelga de la misma base y el mismo `TOTEM_ID` que las métricas. |
 | `HEALTH_INTERVAL_SECONDS` | `60` | Cada cuánto se reporta. **`0` desactiva el reporte.** |
-| `HEALTH_EXPECTED_SENSORS` | `spo2,temperature` | Sondas que este tótem lleva, separadas por coma: `spo2`, `temperature` (la del Berry) y `usb_thermometer`. Sólo la desconexión de éstas mueve `status`. Vacío = ninguna. Ver §3.5 y §3.6. |
+| `HEALTH_EXPECTED_SENSORS` | `spo2,temperature` | Qué se vigila en este tótem, separado por coma: `spo2` y `temperature` (el termómetro USB). Sólo la desconexión de éstos mueve `status`. Vacío = ninguno. `usb_thermometer` se acepta como sinónimo de `temperature`. Ver §3.5 y §3.6. |
 
 Las tres se cargan desde `berry-configure.exe`.
 
-> `HEALTH_EXPECTED_SENSORS` ausente equivale a vigilar las dos: un tótem ya
-> instalado no tiene la clave en su `credentials.json` y su comportamiento no
-> cambia al actualizar. El default avisa de más antes que de menos.
->
-> **Si el tótem mide la temperatura con el termómetro USB, poné
-> `spo2,usb_thermometer`.** Con la sonda del Berry ausente, dejar `temperature`
-> deja el health en `degraded` de forma permanente; con `usb_thermometer`, el
-> que se vigila es el termómetro que de verdad usa.
+> `HEALTH_EXPECTED_SENSORS` ausente equivale a `spo2,temperature`. Un tótem
+> con termómetro USB y la configuración por defecto da `ok` sin tocar nada al
+> actualizar. **Un tótem que no mide temperatura** se configura con `spo2`; si
+> no, informa `termometro_no_habilitado` y queda en `degraded`.
 
 ---
 
@@ -394,6 +409,7 @@ Las tres se cargan desde `berry-configure.exe`.
 | `src/cert_check.py` | Revisa los certificados del tótem contra la cadena del backend (§6). |
 | `src/pm6750_protocol.py` | Tablas de estados y la clasificación `SENSOR_DESCONECTADO` / `SENSOR_SIN_PACIENTE`. |
 | `src/data_parser.py` | Registra el estado de cada sensor en `sensor_status`, aparte del payload de métricas. |
+| `src/thermometer_reader.py` | `link_status()` del termómetro USB: de ahí sale `sensors.temperature`. |
 | `src/serial_manager.py` · `src/bluetooth_manager.py` | `link_status()`, mismo contrato en los dos transportes. |
 | `app.py` | `send_health()` (el loop) y `_health_snapshot()`. |
 

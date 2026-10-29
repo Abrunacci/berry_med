@@ -132,6 +132,41 @@ si el tótem no lo usa), y si el tótem lo pide como `usb_thermometer` en
 backend que ya alerta por `disconnectedSensors` no hay nada que cambiar: el
 valor nuevo es `"usb_thermometer"`. Ejemplos en §5.3 y §5.3.1.
 
+> **Reemplazado por §0.10:** desde esta versión el termómetro USB se informa
+> como `temperature`, y `"usb_thermometer"` ya no aparece en el reporte.
+
+### 0.9 Medición por instrumento: `start-ecg`, `start-spo2`, `start-nibp`, `start-temperature`
+
+Además de `start-monitoring`, que publica todo, cada instrumento se puede medir
+por separado con su propio evento de Pusher. El POST de métricas es **el mismo,
+con las mismas claves**, pero sólo trae lo del instrumento pedido: lo demás va
+en su valor de "sin dato". Un pedido nuevo corta la medición que estuviera en
+curso. `start-monitoring`, `stop-monitoring` y `start-blood-pressure` no
+cambian. Detalle en §6.
+
+El `/health` informa qué se está midiendo en `session.measurement`.
+
+### 0.10 La temperatura sale sólo del termómetro USB
+
+La sonda de temperatura del Berry ya no se usa, ni en las métricas ni en el
+`/health`:
+
+- `vitalSigns.temperature` es la del termómetro USB; sin lectura va `"- -"`.
+  Antes, sin termómetro, podía viajar la temperatura ambiente de la sonda suelta.
+- `sensors.temperature` del `/health` es el enlace del termómetro USB. Un tótem
+  con termómetro y la configuración por defecto (`spo2,temperature`) da `ok`
+  sin tocar nada al actualizar. Antes daba `degraded`, porque el Berry
+  informaba su sonda suelta.
+- Un termómetro desenchufado aparece en `disconnectedSensors` como
+  `"temperature"`, una sola vez. `"usb_thermometer"` ya no aparece; en la
+  configuración se sigue aceptando como sinónimo.
+- Un tótem sin termómetro habilitado da `degraded`, con
+  `sensors.temperature.status: "termometro_no_habilitado"`, salvo que se
+  configure `HEALTH_EXPECTED_SENSORS=spo2`.
+- El bloque `thermometer` sigue igual, como detalle (puerto, error).
+
+Ejemplos en §5.1 y §5.3.
+
 ---
 
 ## 1. Panorama
@@ -146,18 +181,19 @@ valor nuevo es `"usb_thermometer"`. Ejemplos en §5.3 y §5.3.1.
                                          └──►  POST  {base}/{id}/health
                                                 (1×/60s, siempre)
 
-   Termómetro USB IR ─────────►  pisa la temperatura del payload
+   Termómetro USB IR ─────────►  la temperatura del payload
 
                                    ▲
                                    │  eventos
                                 Pusher  ◄──── el backend dispara start/stop
+                                              (todo, o un instrumento)
 ```
 
 Dos flujos de salida independientes y uno de entrada:
 
 | | Cuándo | Frecuencia |
 |---|---|---|
-| `POST` métricas | **Sólo con sesión activa** (entre `start` y `stop`) | 1 por segundo |
+| `POST` métricas | **Sólo con sesión activa** (entre un `start-*` y el `stop`) | 1 por segundo |
 | `POST` health | **Siempre**, desde antes de que el Berry conecte | Cada `HEALTH_INTERVAL_SECONDS` (60 por defecto) |
 | Pusher | El tótem está suscripto todo el tiempo | Según el backend |
 
@@ -226,7 +262,7 @@ puesto. Las ondas van recortadas acá; en el POST real viajan enteras.
       "heartRate": "86",
       "respRate": "28",
       "spo2Pulse": "95/84",
-      "temperature": "22.2",
+      "temperature": "36.6",
       "nibp": "- - /- -"
     },
     "ecg": {
@@ -256,6 +292,9 @@ puesto. Las ondas van recortadas acá; en el POST real viajan enteras.
 > Los valores de ECG pegados a 249 no son un error de transcripción: esa captura
 > se grabó con `ECG_GAIN=x1` y el amplificador satura. Ver [`ecg.md`](ecg.md)
 > §10.
+>
+> La temperatura no sale de la captura: es la del termómetro USB, que no pasa
+> por el Berry (§4.5).
 
 ### 4.2 Los campos
 
@@ -338,16 +377,24 @@ bueno manda `"-/83"`, no borra los dos.
 > El `115/52` del ejemplo sale de `tests/capturas/nibp_medicion.bin`: una
 > medición de presión real de punta a punta.
 
-**La temperatura puede venir del termómetro USB.** Si `THERMOMETER_ENABLED` está
-en `true` y hay una lectura válida, esa pisa la del Berry sobre el payload, ya
-convertida a Celsius. No hay una clave `thermometer` aparte: viaja siempre en
-`vitalSigns.temperature`.
+**La temperatura viene sólo del termómetro USB.** Con `THERMOMETER_ENABLED` en
+`true` y una lectura válida, va en `vitalSigns.temperature`, ya convertida a
+Celsius; sin lectura, `"- -"`. La sonda de temperatura del Berry ya no se usa.
+No hay una clave `thermometer` aparte en las métricas.
+
+**Con una medición por instrumento** (§6), las claves de los otros instrumentos
+viajan en su "sin dato": `"- -"` o `"- - /- -"` en `vitalSigns`, listas vacías
+en las ondas, las 7 derivaciones vacías y `ecgInfo` con sus campos en `null`.
 
 ### 4.6 Cuándo NO manda
 
 El POST se saltea si el payload no tiene ni un dato útil — todos los
 `vitalSigns` en su centinela **y** todas las ondas vacías o en cero. Evita
 inundar el backend con paquetes sin contenido cuando no hay nadie puesto.
+
+La regla se aplica después de filtrar por instrumento: con `start-nibp` no sale
+nada mientras infla el manguito y el primer POST trae el resultado; con
+`start-temperature`, nada hasta que el paciente se mide.
 
 ### 4.7 Respuesta y reintentos
 
@@ -389,15 +436,20 @@ De `tests/capturas/ocioso.bin`: todo enchufado, nadie puesto. **Es el estado del
   },
   "sensors": {
     "spo2":        { "status": "sin_paciente",     "kind": "sin_paciente", "expected": true,  "secondsAgo": 0.3, "stale": false },
-    "temperature": { "status": "ok",               "kind": "ok",           "expected": true,  "secondsAgo": 0.3, "stale": false },
+    "temperature": { "status": "ok", "source": "usb_thermometer", "port": "COM5",
+                     "kind": "ok", "expected": true, "secondsAgo": 0.0, "stale": false },
     "ecg":         { "status": "electrodo_suelto", "kind": "sin_paciente", "expected": false, "secondsAgo": 0.3, "stale": false,
                      "leadOff": true, "weakSignal": false }
   },
   "disconnectedSensors": [],
   "expectedSensors": ["spo2", "temperature"],
   "sensorsWithoutPatient": ["ecg", "spo2"],
-  "thermometer": { "enabled": false, "port": null, "connected": false, "expected": false },
-  "session": { "active": false, "secondsElapsed": null },
+  "thermometer": {
+    "enabled": true, "port": "COM5", "connected": true, "portOpen": true,
+    "readerAlive": true, "lastReadingSecondsAgo": null, "error": null,
+    "expected": true
+  },
+  "session": { "active": false, "secondsElapsed": null, "measurement": null },
   "certificates": {
     "checked": true, "checkedSecondsAgo": 3598.2, "inspected": 2,
     "warnDays": 30, "warnings": [], "error": null
@@ -413,6 +465,10 @@ De `tests/capturas/ocioso.bin`: todo enchufado, nadie puesto. **Es el estado del
 Fijate que el SpO₂ dice `sin_paciente` y el ECG `electrodo_suelto` y el estado
 general sigue en `ok`: **sin nadie puesto, eso es lo sano**. Alertar por eso
 sería ruido permanente.
+
+`sensors.temperature` es el termómetro USB, con la configuración por defecto.
+La sonda de temperatura del Berry no aparece: ya no se usa, aunque el equipo la
+siga informando suelta.
 
 ### 5.2 Una sonda desenchufada del equipo
 
@@ -430,52 +486,59 @@ tiene que ir a enchufar algo.
 }
 ```
 
-### 5.3 Una sonda que este tótem no lleva
-
-Mismo tótem ocioso, pero configurado con
-`HEALTH_EXPECTED_SENSORS=spo2,usb_thermometer` porque mide la temperatura con el
-termómetro USB IR:
-
-```json
-{
-  "status": "ok",
-  "sensors": {
-    "temperature": { "status": "t1_desconectado", "kind": "falla", "expected": false }
-  },
-  "thermometer": {
-    "enabled": true, "port": "COM5", "connected": true, "portOpen": true,
-    "readerAlive": true, "lastReadingSecondsAgo": null, "error": null,
-    "expected": true
-  },
-  "disconnectedSensors": [],
-  "expectedSensors": ["spo2", "usb_thermometer"]
-}
-```
-
-El estado se informa igual —`kind: "falla"`— pero con `expected: false` no mueve
-el estado general. **No alertar no es lo mismo que ocultar.**
-
-`lastReadingSecondsAgo: null` tampoco es una alerta: el termómetro sólo
-transmite cuando alguien se mide.
-
-### 5.3.1 El termómetro USB con el puerto mal asignado
+### 5.3 El termómetro USB con el puerto mal asignado
 
 Mismo tótem, con `THERMOMETER_PORT` apuntando a un COM que no existe. La
-temperatura del termómetro no llega a las métricas, y ahora el health lo dice:
+temperatura no llega a las métricas, y el health lo dice:
 
 ```json
 {
   "status": "degraded",
+  "sensors": {
+    "temperature": { "status": "termometro_desconectado", "source": "usb_thermometer",
+                     "port": "COM5", "kind": "falla", "expected": true,
+                     "secondsAgo": 0.0, "stale": false }
+  },
   "thermometer": {
     "enabled": true, "port": "COM5", "connected": false, "portOpen": false,
     "readerAlive": true, "lastReadingSecondsAgo": null,
     "error": "SerialException: could not open port 'COM5': FileNotFoundError(2, 'El sistema no puede encontrar el archivo especificado.', None, 2)",
     "expected": true
   },
-  "disconnectedSensors": ["usb_thermometer"],
-  "expectedSensors": ["spo2", "usb_thermometer"]
+  "disconnectedSensors": ["temperature"],
+  "expectedSensors": ["spo2", "temperature"]
 }
 ```
+
+Aparece una sola vez, como `"temperature"`. El motivo va en
+`thermometer.error`.
+
+`lastReadingSecondsAgo: null` con el puerto abierto no es una alerta: el
+termómetro sólo transmite cuando alguien se mide.
+
+### 5.3.1 Un tótem sin termómetro USB
+
+Con `THERMOMETER_ENABLED=false` y la configuración por defecto. Todos los
+tótems que miden temperatura llevan el termómetro USB, así que esto es una
+configuración incompleta:
+
+```json
+{
+  "status": "degraded",
+  "sensors": {
+    "temperature": { "status": "termometro_no_habilitado", "source": "usb_thermometer",
+                     "port": null, "kind": "falla", "expected": true,
+                     "secondsAgo": 0.0, "stale": false }
+  },
+  "thermometer": { "enabled": false, "port": null, "connected": false, "expected": true },
+  "disconnectedSensors": ["temperature"],
+  "expectedSensors": ["spo2", "temperature"]
+}
+```
+
+Un tótem que no mide temperatura se configura con `HEALTH_EXPECTED_SENSORS=spo2`:
+entonces da `ok`, y `sensors.temperature` se sigue informando con
+`expected: false`. **No alertar no es lo mismo que ocultar.**
 
 ### 5.4 Un certificado del tótem por vencer
 
@@ -510,8 +573,9 @@ ejemplo `"sólo se revisa en Windows"` si el monitor corre en Linux.
 | Si el Berry está enganchado | `device.dataFresh` (no `device.connected` solo) |
 | Si llegan las órdenes | `pusher.connected` |
 | Si hay que mandar a alguien | `disconnectedSensors` no vacío |
-| Si el termómetro USB está enganchado | `thermometer.connected`, y `thermometer.error` si no |
+| Si el termómetro USB está enganchado | `sensors.temperature.status`, y `thermometer.error` si no |
 | Si hay una medición en curso | `session.active` |
+| Qué se está midiendo | `session.measurement` |
 | Si a ese tótem se le está venciendo un certificado | `certificates.warnings` (`expired`, `daysLeft`) |
 | Qué exe tiene puesto | `build.version` y `build.commit` |
 
@@ -519,16 +583,20 @@ ejemplo `"sólo se revisa en Windows"` si el monitor corre en Linux.
 
 ## 6. Lo que el tótem escucha: eventos de Pusher
 
-El tótem se suscribe al canal `PUBLIC_CHANNEL` y escucha tres eventos:
+El tótem se suscribe al canal `PUBLIC_CHANNEL` y escucha estos eventos:
 
 | Evento | Nombre | Qué hace |
 |---|---|---|
-| Arranque | `START_EVENT_NAME` (default `start-monitoring`) | Limpia el estado de la sesión anterior y empieza a postear métricas. |
-| Parada | `STOP_EVENT_NAME` (default `stop-monitoring`) | Corta el envío y limpia. |
-| Presión | **`start-blood-pressure`** (fijo) | Borra la presión anterior y le pide al equipo una medición nueva. |
+| Arranque | `START_EVENT_NAME` (default `start-monitoring`) | Limpia el estado de la sesión anterior y empieza a postear métricas de **todos** los instrumentos. |
+| Parada | `STOP_EVENT_NAME` (default `stop-monitoring`) | Corta el envío y limpia, sea cual sea la medición en curso. |
+| Presión | **`start-blood-pressure`** (fijo) | Borra la presión anterior y le pide al equipo una medición nueva. No cambia qué se publica. |
+| ECG | **`start-ecg`** (fijo) | Medición sólo del electrocardiógrafo. |
+| Oxímetro | **`start-spo2`** (fijo) | Medición sólo del oxímetro. |
+| Tensiómetro | **`start-nibp`** (fijo) | Medición sólo de la presión: borra la anterior e infla el manguito. |
+| Termómetro | **`start-temperature`** (fijo) | Medición sólo del termómetro USB: descarta la última lectura. |
 
-Los dos primeros tienen el nombre configurable; **el de presión está fijo en el
-código** (`app.py`), no se configura.
+Los dos primeros tienen el nombre configurable; **los demás están fijos en el
+código** (`app.py` y `src/measurement.py`), no se configuran.
 
 No se lee el contenido del evento: alcanza con que llegue.
 
@@ -540,9 +608,50 @@ una medición nueva podría llevarse datos de la anterior.
 
 Por la misma razón existe `MAX_SESSION_MINUTES`: si el `stop` nunca llega, la
 sesión se corta sola pasado ese tope. Sin eso el tótem postea una vez por segundo
-para siempre. `0` desactiva el corte.
+para siempre. `0` desactiva el corte. Vale igual para una medición por
+instrumento.
 
----
+### 6.2 Medición por instrumento
+
+Cada `start-<instrumento>` publica el mismo POST de métricas (§4), con las
+mismas claves, pero sólo con los campos de ese instrumento. Los de los demás van
+en su valor de "sin dato" (§4.5).
+
+| Comando | Instrumento | Campos que trae |
+|---|---|---|
+| `start-ecg` | Electrocardiógrafo (electrodos del Berry) | `ecg`, `ecgPeaks`, `ecgInfo`, `resp`, `vitalSigns.heartRate`, `vitalSigns.respRate` |
+| `start-spo2` | Oxímetro (pinza del Berry) | `spo2`, `vitalSigns.spo2Pulse` |
+| `start-nibp` | Tensiómetro (manguito del Berry) | `vitalSigns.nibp` |
+| `start-temperature` | Termómetro USB IR | `vitalSigns.temperature` |
+
+La respiración va con el ECG: el Berry la mide con los mismos electrodos, y la
+frecuencia respiratoria llega en el mismo paquete que la cardíaca.
+
+Una medición por instrumento termina igual que una de `start-monitoring`: con el
+`stop`, con otro pedido de medición o al cumplirse `MAX_SESSION_MINUTES`. La
+presión deja de inflar sola al terminar, como siempre, pero el envío sigue hasta
+el `stop`.
+
+El corte es sólo por software: el Berry sigue transmitiendo todo y el tótem
+filtra lo que publica. Apagar streams en el equipo dispararía el watchdog de
+20 s, que le corta la alimentación.
+
+### 6.3 Qué pasa al cortar una medición
+
+Hay una sola medición a la vez. Cualquier pedido de medición —`start-ecg`,
+`start-spo2`, `start-nibp`, `start-temperature` o `start-monitoring`— que llega
+con otra en curso la corta y arranca la nueva, aunque sea del mismo
+instrumento:
+
+1. Se deja de publicar lo de la medición anterior.
+2. Si el manguito estaba inflando, se le manda al equipo la orden de parar la
+   presión (desinfla), por USB y por Bluetooth.
+3. Se limpia el estado de la sesión: valores, ondas y la última lectura del
+   termómetro. Nada de la medición anterior viaja en la nueva.
+4. Arranca la nueva, con el tope de `MAX_SESSION_MINUTES` desde cero.
+
+Cada corte queda en el log del tótem (`[MEDICION] Se corta 'spo2' (12.4s) para
+arrancar 'nibp'`).
 
 ## 7. El ciclo de una sesión
 
@@ -555,8 +664,9 @@ para siempre. `0` desactiva el corte.
      │
      ├─► se suscribe al canal de Pusher
      │
-     │   ◄── evento start-monitoring
-     ├─► limpia estado, POST /metrics cada 1s ──────────────────►
+     │   ◄── evento start-monitoring  … o start-<instrumento>
+     ├─► corta lo que hubiera en curso, limpia estado,
+     │   POST /metrics cada 1s (todo, o sólo ese instrumento) ─►
      │
      │   ◄── evento start-blood-pressure
      ├─►    limpia la presión, el equipo infla el manguito
@@ -573,6 +683,7 @@ para siempre. `0` desactiva el corte.
 | Archivo | Qué aporta |
 |---|---|
 | `app.py` | `send_data()` (métricas), `send_health()`, `_build_api_url()`, los handlers de Pusher. |
+| `src/measurement.py` | Los comandos por instrumento, el filtro del payload y la sesión de medición. |
 | `config.py` | Lee y valida la config; arma las URLs. |
 | `src/data_parser.py` | De las tramas del equipo al objeto `data`. |
 | `src/health.py` | Arma el objeto de health y calcula `status`. |
