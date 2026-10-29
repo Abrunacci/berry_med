@@ -14,15 +14,19 @@ def sin_log(_):
 
 # --- Sondas esperadas -------------------------------------------------------
 
-def test_sin_la_clave_se_vigilan_las_dos_sondas_del_equipo():
-    """Un tótem ya instalado no tiene la clave en su credentials.json, y su
-    /health no puede cambiar de comportamiento por eso. En particular, no
-    puede empezar a alertar por un termómetro USB que quizás no tiene."""
+def test_sin_la_clave_se_vigilan_el_spo2_y_la_temperatura():
+    """Un tótem ya instalado no tiene la clave en su credentials.json. La
+    temperatura es la del termómetro USB."""
     assert parse_sensores_esperados(None) == {"spo2", "temperature"}
 
 
-def test_el_termometro_usb_se_puede_pedir():
-    assert parse_sensores_esperados("spo2,usb_thermometer") == {"spo2", "usb_thermometer"}
+def test_usb_thermometer_se_toma_como_temperature_y_avisa():
+    """Es el nombre de la 1.0.10: un tótem configurado así tiene que seguir
+    vigilando el termómetro sin tocar la config."""
+    avisos = []
+    assert parse_sensores_esperados("spo2,usb_thermometer", log=avisos.append) \
+        == {"spo2", "temperature"}
+    assert avisos and "usb_thermometer" in avisos[0]
 
 
 def test_una_sola_sonda():
@@ -50,19 +54,12 @@ def test_una_lista_toda_invalida_no_rompe():
     assert parse_sensores_esperados("ecg,nibp", log=sin_log) == set()
 
 
-def test_el_configurador_no_deja_vigilar_un_termometro_apagado():
-    """La combinación deja el health en rojo para siempre: se espera un
-    termómetro que la app no va a abrir nunca."""
+def test_el_configurador_no_bloquea_la_config_por_defecto():
+    """`spo2,temperature` con el termómetro apagado es lo que tiene un tótem
+    recién instalado: no puede impedir guardar. El health lo informa."""
     from src.config_schema import validate
-    errores = validate({"HEALTH_EXPECTED_SENSORS": "spo2,usb_thermometer",
+    errores = validate({"HEALTH_EXPECTED_SENSORS": "spo2,temperature",
                         "THERMOMETER_ENABLED": "false"})
-    assert "HEALTH_EXPECTED_SENSORS" in errores
-
-
-def test_el_configurador_acepta_vigilar_un_termometro_habilitado():
-    from src.config_schema import validate
-    errores = validate({"HEALTH_EXPECTED_SENSORS": "spo2,usb_thermometer",
-                        "THERMOMETER_ENABLED": "true", "THERMOMETER_PORT": "COM5"})
     assert "HEALTH_EXPECTED_SENSORS" not in errores
 
 

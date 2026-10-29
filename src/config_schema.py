@@ -122,14 +122,11 @@ FIELDS = (
                "reporte."),
     Field("HEALTH_EXPECTED_SENSORS", "Sondas que tiene este tótem", "API",
           default="spo2,temperature",
-          help="Separadas por coma: spo2, temperature (la sonda del Berry) y "
-               "usb_thermometer (el termómetro USB aparte). Sólo la "
-               "desconexión de éstas pone el estado en 'degraded'. Si el "
-               "tótem mide la temperatura con el termómetro USB y no tiene la "
-               "sonda del Berry, poné 'spo2,usb_thermometer': el equipo "
-               "informa su sonda desconectada todo el tiempo y si no, el "
-               "health queda en rojo para siempre. Vacío = no vigilar "
-               "ninguna."),
+          help="Separadas por coma: spo2 y temperature (el termómetro USB; "
+               "la sonda de temperatura del Berry ya no se usa). Sólo la "
+               "desconexión de éstas pone el estado en 'degraded'. Con "
+               "temperature hay que habilitar el termómetro: si no, el health "
+               "lo informa como no habilitado. Vacío = no vigilar ninguna."),
 )
 
 BY_KEY = {f.key: f for f in FIELDS}
@@ -242,13 +239,6 @@ def validate(values: dict) -> dict:
     if str(values.get("THERMOMETER_ENABLED", "")).lower() == "true" \
             and not str(values.get("THERMOMETER_PORT", "")).strip():
         errors["THERMOMETER_PORT"] = "Requerido si el termómetro está habilitado"
-
-    esperados = {s.strip().lower()
-                 for s in str(values.get("HEALTH_EXPECTED_SENSORS", "")).split(",")}
-    if "usb_thermometer" in esperados \
-            and str(values.get("THERMOMETER_ENABLED", "")).lower() != "true":
-        errors["HEALTH_EXPECTED_SENSORS"] = (
-            "Para vigilar usb_thermometer hay que habilitar el termómetro")
 
     return errors
 

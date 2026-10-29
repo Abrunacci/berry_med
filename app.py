@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import functools
 import os
 import sys
 import time
@@ -15,6 +16,7 @@ from src.cert_check import REINTENTO_SEG, REVISION_SEG, revisar_certificados
 from src.data_parser import BMDataParser
 from src.logging_setup import setup as setup_logging
 from src.health import HealthReporter
+from src.measurement import COMANDOS, MONITOREO, SesionDeMedicion, filtrar_payload
 from src.ssl_context import get_ssl_context
 from src.thermometer_reader import ThermometerReader
 
@@ -127,12 +129,18 @@ class VitalsMonitor:
               f"(cada {self.health_interval:.0f}s)"
               if self.health_interval else "[DEBUG] Health desactivado")
 
-        self.is_sending_data = False
         # Tope de duración de una sesión sin stop. 0 = sin corte automático.
         self.max_session_seconds = (
             float(self.credentials.get("max_session_minutes", 30)) * 60
         )
-        self._sending_since = None  # monotonic() del start; None = sin sesión
+        # Qué se está midiendo (todo el tótem o un instrumento) y desde cuándo.
+        # Es el único camino de arranque y cierre: ver src/measurement.py.
+        self.sesion = SesionDeMedicion(
+            limpiar=self._reset_session_state,
+            cortar_presion=self._cortar_presion,
+            arrancar_presion=self._arrancar_presion,
+            max_seconds=self.max_session_seconds,
+        )
 
         # Bind connection handlers for the client
         self.pusher_subscriber.connection.bind(
@@ -164,10 +172,15 @@ class VitalsMonitor:
                 status_callback=self.status_callback
             )
             self.thermometer_reader.start()
-        elif "usb_thermometer" in self.health.sensores_esperados:
-            print("[HEALTH][WARN] HEALTH_EXPECTED_SENSORS pide vigilar "
-                  "usb_thermometer pero THERMOMETER_ENABLED está en false: el "
-                  "health lo va a informar desconectado.")
+        elif "temperature" in self.health.sensores_esperados:
+            print("[HEALTH][WARN] HEALTH_EXPECTED_SENSORS vigila temperature "
+                  "pero THERMOMETER_ENABLED está en false: la temperatura sale "
+                  "del termómetro USB, así que el health va a informar "
+                  "'termometro_no_habilitado' y el estado 'degraded'.")
+
+    @property
+    def is_sending_data(self) -> bool:
+        return self.sesion.activa
 
     def _build_api_url(self, endpoint=None) -> str:
         """Arma `{API_URL}/{TOTEM_ID}/{endpoint}`.
@@ -336,15 +349,13 @@ class VitalsMonitor:
             device = {"connected": False, "lastFrameSecondsAgo": None,
                       "error": f"{type(e).__name__}: {e}"}
 
-        transcurrido = (
-            round(time.monotonic() - self._sending_since, 1)
-            if self._sending_since is not None else None
-        )
         return self.health.snapshot(
             device=device,
             pusher=self.pusher_subscriber,
             session={"active": self.is_sending_data,
-                     "secondsElapsed": transcurrido},
+                     "secondsElapsed": self.sesion.segundos(),
+                     # "monitoring", un instrumento, o None sin sesión.
+                     "measurement": self.sesion.medicion},
             certificates=self._certificados,
             thermometer=self._thermometer_status(),
         )
@@ -369,6 +380,11 @@ class VitalsMonitor:
                 channel.bind(self.start_event_name, self.handle_start_event)
                 channel.bind(self.stop_event_name, self.handle_stop_event)
                 channel.bind('start-blood-pressure', self.handle_blood_pressure_event)
+                # Un evento por instrumento: `start-ecg`, `start-spo2`,
+                # `start-nibp`, `start-temperature`. Ver src/measurement.py.
+                for evento, instrumento in COMANDOS.items():
+                    channel.bind(evento, functools.partial(
+                        self.handle_instrument_event, instrumento))
                 print(f"[DEBUG] Successfully subscribed to {self.public_channel}")
             else:
                 print("[ERROR] Failed to subscribe to channel")
@@ -415,30 +431,61 @@ class VitalsMonitor:
 
     def _stop_session(self, reason: str):
         """Corta el envío y deja todo limpio. Único camino de cierre."""
-        self.is_sending_data = False
-        self._sending_since = None
-        self._reset_session_state()
+        self.sesion.parar(reason)
         print(f"[DEBUG] Stopped data transmission ({reason})")
 
     def _session_expired(self) -> bool:
         """True si la sesión superó el tope sin que llegara el stop."""
-        if not self.max_session_seconds or self._sending_since is None:
-            return False
-        return (time.monotonic() - self._sending_since) >= self.max_session_seconds
+        return self.sesion.vencida()
+
+    def _correr_en_el_loop(self, coro, timeout=10):
+        """Corre una corrutina del lector en el loop principal y la espera.
+
+        Los handlers de Pusher corren en el hilo de pysher, no en el loop.
+        """
+        if not self.main_loop:
+            coro.close()
+            print("[ERROR] Main event loop not initialized")
+            return
+        asyncio.run_coroutine_threadsafe(coro, self.main_loop).result(timeout)
+
+    def _cortar_presion(self):
+        """Para un manguito que pudiera estar inflando al cortar una medición.
+
+        Por USB no hace falta: `reset_state()` (dentro de la limpieza) ya le
+        manda STOP de NIBP al equipo. Por Bluetooth no había nada que lo hiciera.
+        """
+        if not self.using_usb_monitor:
+            self._correr_en_el_loop(self.monitor.stop_nibp())
+
+    def _arrancar_presion(self):
+        """Le pide al equipo una medición de presión. La usa `start-nibp`."""
+        print("[DEBUG] Starting blood pressure measurement")
+        self._correr_en_el_loop(self.monitor.start_nibp())
 
     def handle_start_event(self, event_data):
         """Handle the start monitoring event"""
         try:
-            # Limpiar ANTES de habilitar el envío, para que el primer POST de
-            # la medición nueva no pueda llevarse nada de la anterior. Va acá y
-            # no sólo en el stop porque el stop puede no llegar nunca: pestaña
-            # cerrada, Pusher caído, la app del otro lado reiniciando.
-            self._reset_session_state()
-            self._sending_since = time.monotonic()
-            self.is_sending_data = True
+            # La limpieza ANTES de habilitar el envío la hace la sesión: el
+            # stop puede no llegar nunca (pestaña cerrada, Pusher caído, la app
+            # del otro lado reiniciando). Si había una medición en curso, se
+            # corta.
+            self.sesion.arrancar(MONITOREO)
             print("[DEBUG] Starting data transmission")
         except Exception as e:
             print(f"[ERROR] Error processing start event: {e}")
+
+    def handle_instrument_event(self, instrumento, event_data=None):
+        """`start-<instrumento>`: publica sólo ese instrumento.
+
+        Corta la medición que hubiera en curso —de un instrumento o la de
+        `start-monitoring`— y arranca ésta. El POST es el mismo, con lo de los
+        otros instrumentos en "sin dato" (ver src/measurement.py).
+        """
+        try:
+            self.sesion.arrancar(instrumento)
+        except Exception as e:
+            print(f"[ERROR] Error processing start-{instrumento} event: {e}")
 
     def handle_stop_event(self, event_data):
         """Handle the stop monitoring event"""
@@ -495,6 +542,8 @@ class VitalsMonitor:
                     # POST siguiente en vez de perderse. Ver su docstring.
                     data = self.data_parser.tomar_payload()
                     self._apply_thermometer_temperature(data)
+                    # Con `start-<instrumento>`, sólo lo de ese instrumento.
+                    data = filtrar_payload(data, self.sesion.medicion)
                     if not self._is_valid_data(data):
                         await asyncio.sleep(1)
                         continue

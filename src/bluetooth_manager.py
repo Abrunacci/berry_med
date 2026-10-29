@@ -121,6 +121,19 @@ class BMPatientMonitor:
                 )
                 await asyncio.sleep(0.05)
 
+    async def stop_nibp(self):
+        """Para la medición de presión (el equipo desinfla el manguito).
+
+        La usa la app al cortar una medición para arrancar otra: sin esto, por
+        Bluetooth un manguito a mitad de inflado seguía solo. La vía USB lo
+        hace en `reset_state()`.
+        """
+        if self.client and self.client.is_connected:
+            await self.client.write_gatt_char(
+                self.CHAR_SEND_UUID, bytearray(build_command(CMD_NIBP, 0x00))
+            )
+            await asyncio.sleep(0.05)
+
     def _handle_data(self, _, data: bytearray):
         # Update last data timestamp
         self.last_data_timestamp = asyncio.get_event_loop().time()

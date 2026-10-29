@@ -29,6 +29,14 @@ WATCHDOG_POWER_OFF_SEC = 5.0
 WATCHDOG_RECONNECT_RETRY_SEC = 5.0
 WATCHDOG_USB_RECONNECT_RETRY_SEC = 2.0
 
+# Segundos después de arrancar una medición de NIBP en los que un resultado
+# "terminal" (terminado, detenido, error) se ignora: es el eco del STOP que
+# `reset_state()` le acaba de mandar al equipo al cortar la medición anterior.
+# Con `start-nibp` el arranque va pegado a ese STOP, y sin esto `_nibp_done()`
+# tomaba el eco como el final de la medición nueva y la paraba. Ninguna medición
+# real termina tan rápido: el inflado solo ya tarda más.
+NIBP_GRACIA_SEG = 2.0
+
 
 class PM6750USBReader:
     """
@@ -50,6 +58,7 @@ class PM6750USBReader:
         self._t     = None              # hilo de lectura
         self.nibp_running = False       # ← flag
         self._nibp_timeout_task = None
+        self._nibp_desde = None         # monotonic() del último start de NIBP
         # monotonic() de la última lectura con datos. None = todavía nunca
         # llegó nada. Lo lee `link_status()` para el /health: es la única señal
         # de vida real del enlace — que `connect()` haya dado True sólo dice
@@ -447,12 +456,18 @@ class PM6750USBReader:
             for a1, a2 in build_nibp_commands(self.device_config):
                 self.ser.write(_cmd(a1, a2))
             self.nibp_running = True     # ← bloqueo hasta recibir resultado
+            self._nibp_desde = time.monotonic()
 
     def _nibp_done(self, status, cuff, sys, mean, dia):
         phase  = status & 0x03
         result = (status >> 2) & 0x0F
         # terminales (OK, cancel, error/abort, signal weak…) – ya los tenías
         if result in (0x0, 0x2, 0x4, 0x5):
+            if (self.nibp_running and self._nibp_desde is not None
+                    and time.monotonic() - self._nibp_desde < NIBP_GRACIA_SEG):
+                print(f"[DEBUG] NIBP status=0x{status:02X} ignorado: llegó "
+                      f"pegado al arranque, es de la medición anterior")
+                return
             print(f"[DEBUG] NIBP DONE status=0x{status:02X} phase={phase} result={result} "
             f"cuff={cuff} sys={sys} mean={mean} dia={dia}")
             self.nibp_running = False

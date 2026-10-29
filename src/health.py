@@ -40,20 +40,22 @@ La clasificación vive en `pm6750_protocol.SENSOR_DESCONECTADO` /
 `SENSOR_SIN_PACIENTE` y se publica por sensor en el campo `kind`, para que el
 backend no tenga que conocer las tablas del protocolo.
 
-Y hay una segunda condición para que una falla cuente: que ese sensor se use en
-ESTE tótem. No todos tienen la misma sonda —el de temperatura del Berry no se
-conecta cuando la temperatura se mide con el termómetro USB IR aparte— y el
-equipo informa su ausencia igual, de forma permanente. Sin la lista de sensores
-esperados, un tótem así reporta `degraded` para siempre: el mismo ruido
-permanente que ya nos había pasado con el "no finger" del SpO2, y por la misma
-razón. La lista sale de `HEALTH_EXPECTED_SENSORS`.
+Y hay una segunda condición para que una falla cuente: que ese sensor se vigile
+en ESTE tótem. La lista sale de `HEALTH_EXPECTED_SENSORS`; un sensor fuera de
+ella se publica igual, con `expected: false`, pero no mueve el estado.
 
-El termómetro USB IR es la excepción a "no hay forma de consultarlos": no pasa
-por el Berry, tiene su propio puerto, y ése sí se puede medir. Se publica en
-`thermometer` y, si se lo pide como `usb_thermometer` en la misma lista, un
-puerto que no abre lo pone en `disconnectedSensors`. Lo que no se puede usar
-para decidirlo es la antigüedad de la última lectura: el termómetro sólo manda
-datos cuando alguien se mide.
+La temperatura es la excepción a "no hay forma de consultarlos". Sale del
+termómetro USB IR, que no pasa por el Berry y tiene su propio puerto, y ése sí
+se puede medir: `sensors.temperature` es su enlace (puerto abierto y lector
+vivo), no algo que informe el equipo. La sonda de temperatura del Berry ya no se
+usa y se descarta: en los tótems con termómetro USB no está conectada, el equipo
+la informa suelta en cada paquete, y eso dejaba el health en `degraded` sobre un
+tótem que medía bien. Lo que no se puede usar para decidir el estado del
+termómetro es la antigüedad de su última lectura: sólo manda datos cuando
+alguien se mide.
+
+El detalle del termómetro (puerto, error de apertura, última lectura) va además
+en el bloque `thermometer`.
 """
 
 import time
@@ -69,15 +71,24 @@ FRAME_FRESCO_SEG = 5.0
 # Más generoso que el del enlace: la temperatura y la presión no llegan continuo.
 SENSOR_FRESCO_SEG = 30.0
 
-# Lo que se puede vigilar: las sondas cuya desconexión el equipo sabe informar,
-# más el termómetro USB, que se mide por su propio puerto. Del ECG y del NIBP no
-# hay señal de "cable desenchufado" en el protocolo, así que no tiene sentido
-# esperarlos. Ver docs/health.md.
-SENSORES_VIGILABLES = ("spo2", "temperature", "usb_thermometer")
+# Lo que se puede vigilar: el SpO2, cuya desconexión el equipo sabe informar, y
+# la temperatura, que es el termómetro USB y se mide por su propio puerto. Del
+# ECG y del NIBP no hay señal de "cable desenchufado" en el protocolo, así que
+# no tiene sentido esperarlos. Ver docs/health.md.
+SENSORES_VIGILABLES = ("spo2", "temperature")
 
-# Lo que se vigila sin lista: las dos sondas del equipo. El termómetro USB no
-# entra solo porque no todos los tótems lo tienen.
+# Lo que se vigila sin lista.
 SENSORES_POR_DEFECTO = ("spo2", "temperature")
+
+# Nombres viejos que se siguen aceptando. `usb_thermometer` era el termómetro
+# USB cuando `temperature` todavía era la sonda del Berry (1.0.10); ahora son lo
+# mismo y se informa siempre como `temperature`.
+SINONIMOS = {"usb_thermometer": "temperature"}
+
+# Estados de `sensors.temperature`, que salen del enlace del termómetro USB.
+TERMOMETRO_OK = "ok"
+TERMOMETRO_DESCONECTADO = "termometro_desconectado"
+TERMOMETRO_NO_HABILITADO = "termometro_no_habilitado"
 
 # Cómo se publica el termómetro cuando la app no lo arrancó.
 TERMOMETRO_APAGADO = {"enabled": False, "port": None, "connected": False}
@@ -99,7 +110,8 @@ class HealthReporter:
         # que el equipo sabe reportar: es el comportamiento que ya había, y
         # falla del lado de avisar de más antes que de menos.
         self.sensores_esperados = frozenset(
-            SENSORES_POR_DEFECTO if sensores_esperados is None else sensores_esperados
+            SINONIMOS.get(s, s) for s in
+            (SENSORES_POR_DEFECTO if sensores_esperados is None else sensores_esperados)
         )
         self._arranque = time.monotonic()
         # Qué exe es este (src/build_info.py). Viaja tal cual en cada reporte.
@@ -107,10 +119,14 @@ class HealthReporter:
 
     # --- armado del objeto --------------------------------------------------
 
-    def _sensores_publicos(self) -> dict:
+    def _sensores_publicos(self, thermometer) -> dict:
         ahora = time.monotonic()
         salida = {}
         for nombre, datos in dict(self.parser.sensor_status).items():
+            if nombre == "temperature":
+                # La sonda del Berry: ya no se usa (ver el docstring del
+                # módulo). La temperatura es la del termómetro USB, abajo.
+                continue
             edad = round(ahora - datos["_t"], 1)
             salida[nombre] = {
                 k: v for k, v in datos.items() if k != "_t"
@@ -122,7 +138,33 @@ class HealthReporter:
             # no puede mover el estado general. El backend lo lee de acá sin
             # tener que conocer la configuración del tótem.
             salida[nombre]["expected"] = nombre in self.sensores_esperados
+        salida["temperature"] = self._temperatura(thermometer)
         return salida
+
+    def _temperatura(self, thermometer) -> dict:
+        """`sensors.temperature`, desde el enlace del termómetro USB.
+
+        Se mide en el momento —puerto abierto y lector vivo, lo mismo que
+        `thermometer.connected`—, así que nunca está viejo. Sin termómetro
+        habilitado es una falla si se vigila: todos los tótems que miden
+        temperatura lo llevan, así que alguien se olvidó de habilitarlo.
+        """
+        termometro = thermometer or TERMOMETRO_APAGADO
+        if not termometro.get("enabled"):
+            estado = TERMOMETRO_NO_HABILITADO
+        elif termometro.get("connected"):
+            estado = TERMOMETRO_OK
+        else:
+            estado = TERMOMETRO_DESCONECTADO
+        return {
+            "status": estado,
+            "source": "usb_thermometer",
+            "port": termometro.get("port"),
+            "secondsAgo": 0.0,
+            "stale": False,
+            "kind": self._clasificar(estado),
+            "expected": "temperature" in self.sensores_esperados,
+        }
 
     @staticmethod
     def _clasificar(status: str) -> str:
@@ -137,7 +179,8 @@ class HealthReporter:
         al primer paciente reporta "no finger" en el SpO2 y lead-off en el ECG
         de forma permanente, que es su estado sano.
         """
-        if status in SENSOR_DESCONECTADO:
+        if status in SENSOR_DESCONECTADO or status in (
+                TERMOMETRO_DESCONECTADO, TERMOMETRO_NO_HABILITADO):
             return "falla"
         if status in SENSOR_SIN_PACIENTE:
             return "sin_paciente"
@@ -189,18 +232,18 @@ class HealthReporter:
     def _termometro_publico(self, thermometer) -> dict:
         """Estado del termómetro USB (ver `ThermometerReader.link_status()`).
 
-        Va aparte de `sensors` porque no lo informa el equipo: se mide por su
-        propio puerto, y su antigüedad no significa lo mismo. Sin termómetro
-        arrancado se publica `enabled: false`, para que el backend distinga
-        "no lo tiene" de "no se está mirando".
+        Es el detalle de `sensors.temperature`: puerto, error de apertura y
+        antigüedad de la última lectura. Sin termómetro arrancado se publica
+        `enabled: false`. `expected` es el mismo que el de
+        `sensors.temperature`; su desconexión cuenta una sola vez, allá.
         """
         salida = dict(thermometer or TERMOMETRO_APAGADO)
-        salida["expected"] = "usb_thermometer" in self.sensores_esperados
+        salida["expected"] = "temperature" in self.sensores_esperados
         return salida
 
     def snapshot(self, device: dict, pusher, session: dict, certificates: dict = None,
                  thermometer: dict = None) -> dict:
-        sensores = self._sensores_publicos()
+        sensores = self._sensores_publicos(thermometer)
         pusher_st = self._pusher_status(pusher)
         termometro = self._termometro_publico(thermometer)
 
@@ -218,11 +261,6 @@ class HealthReporter:
             n for n, d in sensores.items()
             if d["kind"] == "falla" and not d["stale"] and d["expected"]
         )
-        # El termómetro USB entra en la misma lista: para el que lee el health
-        # es lo mismo, alguien tiene que ir a enchufar algo. Si se espera y la
-        # app ni lo arrancó, también: la config dice que el tótem lo tiene.
-        if termometro["expected"] and not termometro.get("connected"):
-            desconectados = sorted(desconectados + ["usb_thermometer"])
         sin_paciente = sorted(
             n for n, d in sensores.items()
             if d["kind"] == "sin_paciente" and not d["stale"]
@@ -252,8 +290,8 @@ class HealthReporter:
             # Sensores conectados pero sin nadie puesto. Va aparte y a título
             # informativo: es el estado normal de un tótem esperando paciente.
             "sensorsWithoutPatient": sin_paciente,
-            # El termómetro USB, si el tótem lo usa. Su desconexión sólo baja
-            # el estado si está en `expectedSensors`.
+            # Detalle del termómetro USB. Su estado ya está en
+            # `sensors.temperature`; acá van el puerto y el error.
             "thermometer": termometro,
             "session": session,
             # Certificados del tótem vencidos o por vencer. Es un aviso: no

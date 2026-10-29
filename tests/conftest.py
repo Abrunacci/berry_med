@@ -115,3 +115,15 @@ def enlace(conectado=True, edad=0.2, transporte="usb"):
         "readerAlive": conectado,
         "lastFrameSecondsAgo": edad,
     }
+
+
+def termometro(conectado=True, edad=None, puerto="COM5"):
+    """Un `ThermometerReader.link_status()`: el termómetro USB habilitado.
+
+    Todos los tótems que miden temperatura lo llevan, así que un tótem sano lo
+    tiene conectado; sin él, `sensors.temperature` es una falla.
+    """
+    return {"enabled": True, "port": puerto, "connected": conectado,
+            "portOpen": conectado, "readerAlive": True,
+            "lastReadingSecondsAgo": edad,
+            "error": None if conectado else "SerialException: could not open port"}
