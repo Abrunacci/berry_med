@@ -26,17 +26,61 @@ class ConfigApp:
         root.title("BerryMed Monitor — Configuración")
         # Ancho pensado para que la URL de métricas entre entera sin scrollear:
         # ~80 caracteres en Courier 9 más los padding de tab, notebook y marco.
-        root.minsize(780, 520)
+        # El alto mínimo es bajo a propósito: en pantallas chicas la ventana
+        # tiene que poder achicarse y el contenido de cada pestaña scrollea.
+        root.minsize(min(780, root.winfo_screenwidth()), 360)
 
         self.existing = schema.load_existing()
         values = schema.initial_values(self.existing)
 
+        # El pie se arma antes que las pestañas para que pack le reserve su
+        # lugar: si la ventana queda chica, se achican las pestañas (que
+        # scrollean) y los botones Guardar/Cancelar siguen a la vista.
         self._build_header()
-        self._build_tabs(values)
         self._build_footer()
+        self._build_tabs(values)
 
         root.bind("<Return>", lambda _e: self.on_save())
         root.bind("<Escape>", lambda _e: self.on_cancel())
+
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            root.bind_all(seq, self._on_wheel, add="+")
+
+        self._fit_to_screen()
+
+    def _fit_to_screen(self):
+        """Tamaño inicial: todo el contenido si entra, si no lo que dé la pantalla.
+
+        Se deja margen para la barra de tareas y la barra de título; lo que no
+        entre queda accesible con el scroll de cada pestaña.
+        """
+        self.root.update_idletasks()
+        width = max((b.winfo_reqwidth() for b in self.tab_bodies), default=0)
+        height = max((b.winfo_reqheight() for b in self.tab_bodies), default=0)
+        for canvas in self.tab_canvases:
+            canvas.configure(width=width, height=height)
+        self.root.update_idletasks()
+
+        w = min(max(780, self.root.winfo_reqwidth()),
+                self.root.winfo_screenwidth() - 40)
+        h = min(self.root.winfo_reqheight(),
+                self.root.winfo_screenheight() - 100)
+        self.root.geometry(f"{w}x{max(h, 360)}+20+20")
+
+    def _on_wheel(self, event):
+        """Rueda del mouse: scrollea la pestaña que está bajo el puntero."""
+        widget = self.root.winfo_containing(event.x_root, event.y_root)
+        while widget is not None and widget not in self.tab_canvases:
+            widget = widget.master
+        if widget is None or widget.yview() == (0.0, 1.0):
+            return
+        if event.num == 4:
+            step = -1
+        elif event.num == 5:
+            step = 1
+        else:
+            step = -1 if event.delta > 0 else 1
+        widget.yview_scroll(step * 3, "units")
 
     # ------------------------------------------------------------ layout ---
     def _build_header(self):
@@ -55,10 +99,12 @@ class ConfigApp:
         nb.pack(fill="both", expand=True)
 
         ports = schema.list_serial_ports()
+        self.tab_bodies = []
+        self.tab_canvases = []
 
         for section in schema.SECTIONS:
-            tab = ttk.Frame(nb, padding=PAD * 1.5)
-            nb.add(tab, text=section)
+            page, tab = self._scrollable(nb)
+            nb.add(page, text=section)
             tab.columnconfigure(1, weight=1)
 
             row = 0
@@ -92,6 +138,44 @@ class ConfigApp:
             ttk.Label(tab, text="* campo requerido", foreground="#777",
                       font=("", 8)).grid(row=row, column=1, sticky="w",
                                          pady=(PAD, 0))
+
+    def _scrollable(self, parent):
+        """Contenedor con scroll vertical para el contenido de una pestaña.
+
+        Devuelve (page, body): `page` va en el notebook y los campos se arman
+        dentro de `body`. La barra de scroll aparece sólo si el contenido no
+        entra en el alto disponible.
+        """
+        page = ttk.Frame(parent)
+        page.rowconfigure(0, weight=1)
+        page.columnconfigure(0, weight=1)
+
+        bg = ttk.Style().lookup("TFrame", "background") or None
+        canvas = tk.Canvas(page, highlightthickness=0, borderwidth=0,
+                           background=bg, height=1)
+        bar = ttk.Scrollbar(page, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=bar.set)
+        canvas.grid(row=0, column=0, sticky="nsew")
+
+        body = ttk.Frame(canvas, padding=PAD * 1.5)
+        window = canvas.create_window((0, 0), window=body, anchor="nw")
+
+        def update(_event=None):
+            canvas.itemconfigure(window, width=canvas.winfo_width())
+            canvas.configure(scrollregion=(0, 0, body.winfo_reqwidth(),
+                                           body.winfo_reqheight()))
+            if body.winfo_reqheight() > canvas.winfo_height():
+                bar.grid(row=0, column=1, sticky="ns")
+            else:
+                bar.grid_remove()
+                canvas.yview_moveto(0)
+
+        body.bind("<Configure>", update)
+        canvas.bind("<Configure>", update)
+
+        self.tab_bodies.append(body)
+        self.tab_canvases.append(canvas)
+        return page, body
 
     def _build_url_preview(self, tab, row):
         """Recuadro con la URL de métricas ya armada, en vivo."""
@@ -192,7 +276,7 @@ class ConfigApp:
 
     def _build_footer(self):
         frame = ttk.Frame(self.root, padding=(PAD * 2, 0, PAD * 2, PAD * 1.5))
-        frame.pack(fill="x")
+        frame.pack(side="bottom", fill="x")
 
         self.status = ttk.Label(frame, text="")
         self.status.pack(side="left")
