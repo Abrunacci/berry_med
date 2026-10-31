@@ -10,7 +10,7 @@ import pytest
 
 from src.measurement import (
     COMANDOS, INSTRUMENTOS, MONITOREO, VITALES_SIN_DATO, SesionDeMedicion,
-    filtrar_payload,
+    comandos, filtrar_payload,
 )
 from tests.tramas import (
     ecg_onda, ecg_params, ecg_pico, nibp_params, resp_onda, spo2_onda,
@@ -39,6 +39,21 @@ def test_hay_un_comando_por_instrumento():
         "start-nibp": "nibp",
         "start-temperature": "temperature",
     }
+
+
+def test_sin_config_los_comandos_son_los_por_defecto():
+    assert comandos(None) == COMANDOS
+    assert comandos({}) == COMANDOS
+
+
+def test_un_comando_renombrado_reemplaza_al_por_defecto():
+    """Se configura como START_EVENT_NAME: el nombre nuevo reemplaza al viejo,
+    no se suma."""
+    renombrados = comandos({"nibp": "tomar-presion", "spo2": ""})
+    assert renombrados["tomar-presion"] == "nibp"
+    assert "start-nibp" not in renombrados
+    assert renombrados["start-spo2"] == "spo2"
+    assert sorted(renombrados.values()) == sorted(INSTRUMENTOS)
 
 
 def test_cada_signo_vital_es_de_un_solo_instrumento(parser):

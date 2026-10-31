@@ -22,6 +22,7 @@ camino de arranque y de cierre.
 import time
 from typing import Callable, Optional
 
+from config import EVENTOS_POR_INSTRUMENTO
 from src.data_parser import BMDataParser
 
 # `start-monitoring`: todo el tótem, como siempre. No es un instrumento.
@@ -41,9 +42,23 @@ INSTRUMENTOS = {
     "temperature": {"data": (), "vitalSigns": ("temperature",)},
 }
 
-# Evento de Pusher -> instrumento. Nombres fijos, como `start-blood-pressure`:
-# no se configuran.
-COMANDOS = {f"start-{instrumento}": instrumento for instrumento in INSTRUMENTOS}
+# Evento de Pusher -> instrumento, con los nombres por defecto. Cada uno se
+# puede renombrar en la configuración, como START_EVENT_NAME (ver
+# `config.EVENTOS_POR_INSTRUMENTO`); ver `comandos()`.
+COMANDOS = {defecto: instrumento
+            for instrumento, (_, defecto) in EVENTOS_POR_INSTRUMENTO.items()}
+
+
+def comandos(nombres: Optional[dict] = None) -> dict:
+    """Evento de Pusher -> instrumento, con los nombres configurados.
+
+    `nombres` es instrumento -> evento (`config.eventos_por_instrumento()`); lo
+    que falte vale el default.
+    """
+    salida = {}
+    for evento, instrumento in COMANDOS.items():
+        salida[(nombres or {}).get(instrumento) or evento] = instrumento
+    return salida
 
 # "Sin dato" de cada signo vital: los mismos centinelas que usa el parser, que
 # son los que reconoce `_is_valid_data` de la app para no postear vacío.

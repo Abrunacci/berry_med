@@ -88,3 +88,50 @@ def test_redactar_no_toca_el_original():
     original = {"api_password": "secreto"}
     redactar(original)
     assert original["api_password"] == "secreto"
+
+
+# --- Eventos de Pusher por instrumento --------------------------------------
+
+def test_sin_las_claves_los_eventos_por_instrumento_son_los_de_siempre():
+    """Un tótem ya instalado no tiene las claves: escucha los nombres por
+    defecto sin tocar la config."""
+    from config import eventos_por_instrumento
+    assert eventos_por_instrumento({}) == {
+        "ecg": "start-ecg", "spo2": "start-spo2",
+        "nibp": "start-nibp", "temperature": "start-temperature"}
+
+
+def test_cada_evento_por_instrumento_se_puede_renombrar():
+    from config import eventos_por_instrumento
+    nombres = eventos_por_instrumento({"START_NIBP_EVENT_NAME": " tomar-presion ",
+                                       "START_ECG_EVENT_NAME": ""})
+    assert nombres["nibp"] == "tomar-presion"
+    assert nombres["ecg"] == "start-ecg"
+
+
+def test_el_configurador_ofrece_los_mismos_eventos_que_lee_la_app():
+    """Las claves y los defaults están en `config.py` y en el esquema del
+    configurador: si se separan, el asistente guardaría algo que la app no lee."""
+    from config import EVENTOS_POR_INSTRUMENTO
+    from src.config_schema import BY_KEY
+    for clave, defecto in EVENTOS_POR_INSTRUMENTO.values():
+        assert BY_KEY[clave].default == defecto
+        assert BY_KEY[clave].section == "Pusher"
+
+
+def test_el_configurador_no_deja_repetir_un_nombre_de_evento():
+    from src.config_schema import validate
+    errores = validate({"START_SPO2_EVENT_NAME": "start-monitoring"})
+    assert "START_SPO2_EVENT_NAME" in errores
+
+
+def test_el_configurador_no_deja_usar_el_nombre_de_la_presion_fija():
+    from src.config_schema import validate
+    errores = validate({"START_NIBP_EVENT_NAME": "start-blood-pressure"})
+    assert "START_NIBP_EVENT_NAME" in errores
+
+
+def test_los_nombres_por_defecto_no_chocan():
+    from src.config_schema import EVENT_KEYS, validate
+    errores = validate({})
+    assert not any(clave in errores for clave in EVENT_KEYS)

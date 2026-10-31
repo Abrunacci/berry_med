@@ -14,7 +14,7 @@ import threading
 import pytest
 
 from src.data_parser import BMDataParser
-from src.measurement import MONITOREO, SesionDeMedicion
+from src.measurement import MONITOREO, SesionDeMedicion, comandos
 from tests.tramas import nibp_params, spo2_onda, spo2_params
 
 
@@ -180,3 +180,28 @@ def test_el_health_dice_que_se_esta_midiendo(app_mod, loop):
     app._health_snapshot()
     assert capturado["session"]["active"] is True
     assert capturado["session"]["measurement"] == "temperature"
+
+
+def test_se_suscribe_con_los_nombres_de_la_config(app_mod, loop):
+    """Igual que START_EVENT_NAME: el tótem escucha el nombre configurado."""
+    app = armar(app_mod, loop)
+    app.public_channel = "totem.01"
+    app.start_event_name = "start-monitoring"
+    app.stop_event_name = "stop-monitoring"
+    app.instrument_events = comandos({"nibp": "tomar-presion"})
+    registrados = {}
+
+    class Canal:
+        def bind(self, evento, callback):
+            registrados[evento] = callback
+
+    class Pusher:
+        def subscribe(self, canal):
+            return Canal()
+
+    app.pusher_subscriber = Pusher()
+    app.connect_handler({})
+    assert "tomar-presion" in registrados and "start-nibp" not in registrados
+    assert {"start-ecg", "start-spo2", "start-temperature"} <= set(registrados)
+    registrados["tomar-presion"]({})
+    assert app.sesion.medicion == "nibp"

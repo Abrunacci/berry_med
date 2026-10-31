@@ -12,7 +12,7 @@ origen.
 
 | Tema | Antes | Ahora |
 |---|---|---|
-| Comandos de medición | Sólo `start-monitoring`, que publica todos los instrumentos. | Además, uno por instrumento: `start-ecg`, `start-spo2`, `start-nibp` y `start-temperature`. Nombres fijos, en el mismo canal `PUBLIC_CHANNEL`. |
+| Comandos de medición | Sólo `start-monitoring`, que publica todos los instrumentos. | Además, uno por instrumento: `start-ecg`, `start-spo2`, `start-nibp` y `start-temperature`. En el mismo canal `PUBLIC_CHANNEL`. Cada nombre se configura como `START_EVENT_NAME` (`START_ECG_EVENT_NAME`, `START_SPO2_EVENT_NAME`, `START_NIBP_EVENT_NAME`, `START_TEMPERATURE_EVENT_NAME`); estos son los defaults. |
 | Qué publica | El POST de métricas con todo. | Con `start-<instrumento>`, el **mismo POST con las mismas claves**, pero sólo con ese instrumento. Lo demás va en "sin dato": `"- -"` / `"- - /- -"` en `vitalSigns`, listas vacías en las ondas, las 7 derivaciones vacías y `ecgInfo` con sus campos en `null`. |
 | Campos por comando | — | `start-ecg`: `ecg`, `ecgPeaks`, `ecgInfo`, `resp`, `heartRate`, `respRate` (la respiración va con el ECG: mismos electrodos). `start-spo2`: `spo2`, `spo2Pulse`. `start-nibp`: `nibp`. `start-temperature`: `temperature`. |
 | `start-nibp` | — | Hace lo mismo que `start-blood-pressure` (borra la presión anterior e infla el manguito), pero además publica sólo la presión. Mientras infla no sale ningún POST; el primero trae el resultado. |
