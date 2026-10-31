@@ -114,6 +114,10 @@ puede guardar un valor inválido.
 | `PUBLIC_CHANNEL` | — | Canal al que se suscribe la app |
 | `START_EVENT_NAME` | `start-monitoring` | Evento que **arranca** el envío de datos |
 | `STOP_EVENT_NAME` | `stop-monitoring` | Evento que **corta** el envío y resetea el parser |
+| `START_ECG_EVENT_NAME` | `start-ecg` | Evento que arranca la medición sólo del ECG |
+| `START_SPO2_EVENT_NAME` | `start-spo2` | Evento que arranca la medición sólo del oxímetro |
+| `START_NIBP_EVENT_NAME` | `start-nibp` | Evento que arranca la medición sólo de la presión |
+| `START_TEMPERATURE_EVENT_NAME` | `start-temperature` | Evento que arranca la medición sólo del termómetro USB |
 | `SSL_CERT_FILE_PATH` | — | Bundle de certificados; se exporta como `SSL_CERT_FILE` |
 | `TOTEM_ID` | — | Identificador del tótem; entra en la URL de métricas |
 | `MAX_SESSION_MINUTES` | `30` | Corta el envío solo si nunca llega el stop. `0` lo desactiva |
@@ -144,9 +148,8 @@ arranca en `False` y el loop de `send_data()` duerme hasta que llega.
 
 > ⚠️ El evento de presión arterial, **`start-blood-pressure`, está hardcodeado**
 > en `app.py` — a diferencia de arranque y parada, no se puede renombrar desde
-> la configuración. Lo mismo los de medición por instrumento (`start-ecg`,
-> `start-spo2`, `start-nibp`, `start-temperature`): ver
-> [`backend.md`](backend.md) §6.
+> la configuración. Los de medición por instrumento sí se configuran (tabla de
+> arriba): ver [`backend.md`](backend.md) §6.
 
 ### 2.2 Conexión con el equipo
 

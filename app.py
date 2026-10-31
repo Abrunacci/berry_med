@@ -16,7 +16,7 @@ from src.cert_check import REINTENTO_SEG, REVISION_SEG, revisar_certificados
 from src.data_parser import BMDataParser
 from src.logging_setup import setup as setup_logging
 from src.health import HealthReporter
-from src.measurement import COMANDOS, MONITOREO, SesionDeMedicion, filtrar_payload
+from src.measurement import MONITOREO, SesionDeMedicion, comandos, filtrar_payload
 from src.ssl_context import get_ssl_context
 from src.thermometer_reader import ThermometerReader
 
@@ -112,6 +112,9 @@ class VitalsMonitor:
         self.public_channel = self.credentials["public_channel"]
         self.start_event_name = self.credentials["start_event_name"]
         self.stop_event_name = self.credentials["stop_event_name"]
+        # Evento -> instrumento, con los nombres de la config.
+        self.instrument_events = comandos(
+            self.credentials.get("instrument_event_names"))
 
         self.health_url = self._build_api_url(self.credentials.get("health_endpoint"))
         self.health_interval = float(
@@ -380,9 +383,10 @@ class VitalsMonitor:
                 channel.bind(self.start_event_name, self.handle_start_event)
                 channel.bind(self.stop_event_name, self.handle_stop_event)
                 channel.bind('start-blood-pressure', self.handle_blood_pressure_event)
-                # Un evento por instrumento: `start-ecg`, `start-spo2`,
-                # `start-nibp`, `start-temperature`. Ver src/measurement.py.
-                for evento, instrumento in COMANDOS.items():
+                # Un evento por instrumento (por defecto `start-ecg`,
+                # `start-spo2`, `start-nibp`, `start-temperature`), con el
+                # nombre de la config. Ver src/measurement.py.
+                for evento, instrumento in self.instrument_events.items():
                     channel.bind(evento, functools.partial(
                         self.handle_instrument_event, instrumento))
                 print(f"[DEBUG] Successfully subscribed to {self.public_channel}")

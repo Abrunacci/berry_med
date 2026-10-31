@@ -70,6 +70,22 @@ FIELDS = (
     Field("STOP_EVENT_NAME", "Evento de parada", "Pusher",
           default="stop-monitoring",
           help="Evento que corta el envío y resetea el parser."),
+    # Medición de un solo instrumento: publica sólo ese y corta la medición
+    # que hubiera en curso. Ver src/measurement.py.
+    Field("START_ECG_EVENT_NAME", "Evento de arranque del ECG", "Pusher",
+          default="start-ecg",
+          help="Evento que arranca la medición sólo del electrocardiógrafo "
+               "(con la respiración)."),
+    Field("START_SPO2_EVENT_NAME", "Evento de arranque del oxímetro", "Pusher",
+          default="start-spo2",
+          help="Evento que arranca la medición sólo del oxímetro (SpO2)."),
+    Field("START_NIBP_EVENT_NAME", "Evento de arranque de la presión", "Pusher",
+          default="start-nibp",
+          help="Evento que arranca la medición sólo de la presión: infla el "
+               "manguito."),
+    Field("START_TEMPERATURE_EVENT_NAME", "Evento de arranque del termómetro",
+          "Pusher", default="start-temperature",
+          help="Evento que arranca la medición sólo del termómetro USB."),
     Field("PUBLIC_CHANNEL", "Canal público", "Pusher", required=True,
           help="Canal de Pusher al que se suscribe la app. Suele ser "
                "'totem.<Totem ID>'."),
@@ -130,6 +146,11 @@ FIELDS = (
 )
 
 BY_KEY = {f.key: f for f in FIELDS}
+
+# Los nombres de evento de Pusher, que no pueden repetirse.
+EVENT_KEYS = ("START_EVENT_NAME", "STOP_EVENT_NAME", "START_ECG_EVENT_NAME",
+              "START_SPO2_EVENT_NAME", "START_NIBP_EVENT_NAME",
+              "START_TEMPERATURE_EVENT_NAME")
 
 # Campos que arman la URL de métricas, en el orden en que se piden. Las dos
 # interfaces refrescan la vista previa cuando cambia cualquiera de estos.
@@ -231,6 +252,18 @@ def validate(values: dict) -> dict:
         errors["API_URL"] = f"Sacá el /{endpoint}: se agrega solo"
     elif totem and url.endswith(f"/{totem}"):
         errors["API_URL"] = "Sacá el Totem ID de la URL: se agrega solo"
+
+    # Dos órdenes con el mismo nombre de evento: el tótem no podría saber
+    # cuál le piden. `start-blood-pressure` es fijo y también cuenta.
+    vistos = {"start-blood-pressure": None}
+    for clave in EVENT_KEYS:
+        nombre = str(values.get(clave, "")).strip() or BY_KEY[clave].default
+        if nombre in vistos:
+            otro = vistos[nombre]
+            errors[clave] = (f"Repetido con {otro}" if otro
+                             else "Ese nombre lo usa la presión (start-blood-pressure)")
+        else:
+            vistos[nombre] = clave
 
     if values.get("DEVICE_CONNECTION", "").lower() == "usb" \
             and not str(values.get("DEVICE_PORT", "")).strip():

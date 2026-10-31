@@ -590,13 +590,18 @@ El tótem se suscribe al canal `PUBLIC_CHANNEL` y escucha estos eventos:
 | Arranque | `START_EVENT_NAME` (default `start-monitoring`) | Limpia el estado de la sesión anterior y empieza a postear métricas de **todos** los instrumentos. |
 | Parada | `STOP_EVENT_NAME` (default `stop-monitoring`) | Corta el envío y limpia, sea cual sea la medición en curso. |
 | Presión | **`start-blood-pressure`** (fijo) | Borra la presión anterior y le pide al equipo una medición nueva. No cambia qué se publica. |
-| ECG | **`start-ecg`** (fijo) | Medición sólo del electrocardiógrafo. |
-| Oxímetro | **`start-spo2`** (fijo) | Medición sólo del oxímetro. |
-| Tensiómetro | **`start-nibp`** (fijo) | Medición sólo de la presión: borra la anterior e infla el manguito. |
-| Termómetro | **`start-temperature`** (fijo) | Medición sólo del termómetro USB: descarta la última lectura. |
+| ECG | `START_ECG_EVENT_NAME` (default `start-ecg`) | Medición sólo del electrocardiógrafo. |
+| Oxímetro | `START_SPO2_EVENT_NAME` (default `start-spo2`) | Medición sólo del oxímetro. |
+| Tensiómetro | `START_NIBP_EVENT_NAME` (default `start-nibp`) | Medición sólo de la presión: borra la anterior e infla el manguito. |
+| Termómetro | `START_TEMPERATURE_EVENT_NAME` (default `start-temperature`) | Medición sólo del termómetro USB: descarta la última lectura. |
 
-Los dos primeros tienen el nombre configurable; **los demás están fijos en el
-código** (`app.py` y `src/measurement.py`), no se configuran.
+Todos tienen el nombre configurable desde `berry-configure.exe`, salvo el de
+presión, que **está fijo en el código** (`app.py`). Sin la clave en la
+configuración vale el default, así que un tótem ya instalado escucha los nombres
+de la tabla. El configurador no deja guardar dos eventos con el mismo nombre.
+
+En el resto de este documento los comandos por instrumento se nombran por su
+default.
 
 No se lee el contenido del evento: alcanza con que llegue.
 

@@ -119,9 +119,15 @@ La URL final queda `{API_URL}/{TOTEM_ID}/{API_ENDPOINT}`. Ver
 | **`PUBLIC_CHANNEL`** | — | Canal al que se suscribe el tótem. Suele ser `totem.<TOTEM_ID>`. |
 | `START_EVENT_NAME` | `start-monitoring` | Evento que habilita el envío. |
 | `STOP_EVENT_NAME` | `stop-monitoring` | Evento que lo corta. |
+| `START_ECG_EVENT_NAME` | `start-ecg` | Evento que arranca la medición sólo del ECG (con la respiración). |
+| `START_SPO2_EVENT_NAME` | `start-spo2` | Evento que arranca la medición sólo del oxímetro. |
+| `START_NIBP_EVENT_NAME` | `start-nibp` | Evento que arranca la medición sólo de la presión (infla el manguito). |
+| `START_TEMPERATURE_EVENT_NAME` | `start-temperature` | Evento que arranca la medición sólo del termómetro USB. |
 
 > El evento de presión es **`start-blood-pressure` y está fijo en el código**: no
-> se configura.
+> se configura. Los cuatro eventos por instrumento sí: sin la clave vale el
+> default. El configurador no deja guardar dos eventos con el mismo nombre. Qué
+> publica cada uno, en [`backend.md`](backend.md) §6.
 
 ### Equipo (Berry PM6750)
 
@@ -175,6 +181,10 @@ La URL final queda `{API_URL}/{TOTEM_ID}/{API_ENDPOINT}`. Ver
   "PUBLIC_CHANNEL": "totem.totem12",
   "START_EVENT_NAME": "start-monitoring",
   "STOP_EVENT_NAME": "stop-monitoring",
+  "START_ECG_EVENT_NAME": "start-ecg",
+  "START_SPO2_EVENT_NAME": "start-spo2",
+  "START_NIBP_EVENT_NAME": "start-nibp",
+  "START_TEMPERATURE_EVENT_NAME": "start-temperature",
 
   "DEVICE_CONNECTION": "usb",
   "DEVICE_PORT": "COM3",

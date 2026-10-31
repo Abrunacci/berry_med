@@ -83,6 +83,25 @@ SENSORES_POR_DEFECTO = ("spo2", "temperature")
 SINONIMOS = {"usb_thermometer": "temperature"}
 
 
+# Evento de Pusher que arranca la medición de cada instrumento: clave del
+# credentials.json -> nombre por defecto. Se configuran igual que
+# START_EVENT_NAME; sin la clave, vale el default. Ver src/measurement.py.
+EVENTOS_POR_INSTRUMENTO = {
+    "ecg": ("START_ECG_EVENT_NAME", "start-ecg"),
+    "spo2": ("START_SPO2_EVENT_NAME", "start-spo2"),
+    "nibp": ("START_NIBP_EVENT_NAME", "start-nibp"),
+    "temperature": ("START_TEMPERATURE_EVENT_NAME", "start-temperature"),
+}
+
+
+def eventos_por_instrumento(credentials) -> dict:
+    """Instrumento -> nombre del evento que lo arranca, desde la config."""
+    return {
+        instrumento: str(credentials.get(clave) or "").strip() or defecto
+        for instrumento, (clave, defecto) in EVENTOS_POR_INSTRUMENTO.items()
+    }
+
+
 def parse_sensores_esperados(valor, log=print):
     """Lista de sondas que ESTE tótem tiene puestas, desde la config.
 
@@ -198,6 +217,8 @@ def get_config():
             "public_channel": credentials.get("PUBLIC_CHANNEL"),
             "start_event_name": credentials.get("START_EVENT_NAME"),
             "stop_event_name": credentials.get("STOP_EVENT_NAME"),
+            # Un evento por instrumento (start-ecg, start-spo2, ...).
+            "instrument_event_names": eventos_por_instrumento(credentials),
             # Tope de minutos que puede durar una sesión si nunca llega el
             # evento de stop; pasado eso el totem corta el envío y limpia solo.
             # 0 desactiva el corte. Ver docs/protocolo_berry.md §7.
