@@ -58,7 +58,10 @@ El detalle del termómetro (puerto, error de apertura, última lectura) va adem�
 en el bloque `thermometer`.
 """
 
+import socket
 import time
+from datetime import datetime
+from typing import Optional
 
 from src.pm6750_protocol import SENSOR_DESCONECTADO, SENSOR_SIN_PACIENTE
 
@@ -94,6 +97,33 @@ TERMOMETRO_NO_HABILITADO = "termometro_no_habilitado"
 TERMOMETRO_APAGADO = {"enabled": False, "port": None, "connected": False}
 
 
+def identificar_instancia(host: Optional[str] = None,
+                          ahora: Optional[datetime] = None) -> str:
+    """Qué exe es este: `<nombre de la PC>@<fecha y hora de arranque>`.
+
+    Ejemplo: `TOTEM-SANMIGUEL-06@2026-11-04T13:18:44-03:00`.
+
+    El backend identifica al tótem por `totemId`, que es configuración: dos PCs
+    con el mismo `TOTEM_ID` (una notebook de pruebas que quedó prendida, por
+    ejemplo) reportan como si fueran el mismo tótem, y sus health se mezclan.
+    Con esto se ven dos valores distintos y se sabe cuál es cuál y desde cuándo
+    corre cada uno. Un reinicio en la misma PC cambia la hora y deja el nombre.
+
+    Va el nombre de la PC y no un ID de hardware porque lo tiene que poder leer
+    una persona; la hora de arranque lo hace único aunque dos PCs clonadas de la
+    misma imagen compartan el nombre. Hora local con su huso, para que se lea
+    igual que el log del tótem sin dudar de la zona.
+    """
+    try:
+        nombre = (host if host is not None else socket.gethostname()).strip()
+    except Exception:
+        nombre = ""
+    momento = ahora or datetime.now()
+    if momento.tzinfo is None:
+        momento = momento.astimezone()   # hora local de la PC, con su huso
+    return f"{nombre or 'sin-nombre'}@{momento.isoformat(timespec='seconds')}"
+
+
 class HealthReporter:
     """Junta el estado de las partes y arma el objeto que se postea.
 
@@ -103,8 +133,11 @@ class HealthReporter:
     así que un lector nunca ve una entrada a medio escribir.
     """
 
-    def __init__(self, totem_id: str, parser, sensores_esperados=None, build=None):
+    def __init__(self, totem_id: str, parser, sensores_esperados=None, build=None,
+                 instance: Optional[str] = None):
         self.totem_id = totem_id
+        # Qué exe es este: PC + hora de arranque. Ver `identificar_instancia()`.
+        self.instance = instance or identificar_instancia()
         self.parser = parser
         # Qué sondas tiene puestas este tótem. Sin lista, se esperan las dos
         # que el equipo sabe reportar: es el comportamiento que ya había, y
@@ -275,6 +308,9 @@ class HealthReporter:
 
         return {
             "totemId": self.totem_id,
+            # PC y hora de arranque de este exe. Dos valores distintos para un
+            # mismo `totemId` son dos monitores reportando como el mismo tótem.
+            "instance": self.instance,
             "status": estado,
             "uptimeSeconds": round(time.monotonic() - self._arranque, 1),
             "device": dict(device, dataFresh=device_ok),

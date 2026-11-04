@@ -163,6 +163,7 @@ algo que se pueda agregar después — el protocolo no lo transmite.
 ```json
 {
   "totemId": "01ksj3g36a6rnvgwszt7fs4jjn",
+  "instance": "TOTEM-SANMIGUEL-06@2026-11-04T13:18:44-03:00",
   "status": "ok",
   "uptimeSeconds": 3612.4,
   "device": {
@@ -257,6 +258,7 @@ algo que se pueda agregar después — el protocolo no lo transmite.
 
 | Campo | Qué es |
 |---|---|
+| `instance` | Qué exe reporta: `<nombre de la PC>@<fecha y hora de arranque>`, hora local con su huso. Cambia en cada arranque y no cambia entre reportes. Ver §5.2. |
 | `status` | `ok` \| `degraded` \| `down`. Ver §5. |
 | `uptimeSeconds` | Segundos desde que arrancó el proceso. |
 | `device.connected` | Puerto abierto **y** hilo lector vivo. |
@@ -329,6 +331,37 @@ operación, y no debería disparar la misma alarma que un tótem incomunicado.
 | Pusher caído | `down` | `pusher.connected: false` |
 | El Berry nunca enganchó | `down` | `lastFrameSecondsAgo: null` |
 
+### 5.2 Dos monitores con el mismo `totemId`
+
+`totemId` es configuración: dos PCs con el mismo `TOTEM_ID` reportan como el
+mismo tótem. Pasó el 04/11/2026 con el tótem 6: los equipos se pasaron de una
+notebook de pruebas a la PC del tótem y la notebook quedó prendida con el
+monitor corriendo. El backend recibía `ok` (del tótem) y `down` (de la notebook)
+intercalados, sin forma de saber de dónde venía cada uno.
+
+`instance` los separa:
+
+| `instance` | `status` | `device.dataFresh` |
+|---|---|---|
+| `NOTEBOOK-54922@2026-11-04T11:37:52-03:00` | `down` | `false` |
+| `TOTEM-SANMIGUEL-06@2026-11-04T13:18:44-03:00` | `ok` | `true` |
+
+- **Dos `instance` distintos para un mismo `totemId` en pocos minutos** son dos
+  monitores corriendo. Un reinicio no lo es: el `instance` viejo deja de llegar.
+- **El válido es el que tiene `device.dataFresh: true`**: un Berry no puede
+  estar enchufado en dos PCs a la vez. Si los dos tienen datos, hay dos Berrys
+  con el mismo `TOTEM_ID` (error de configuración); si ninguno, el tótem está
+  caído igual.
+- El POST de métricas lleva el mismo valor en el header `X-Berry-Instance`.
+
+### 5.3 El primer reporte
+
+El primer health espera a que termine el primer intento de conexión con el
+equipo y a que Pusher conecte, con un tope de 30 s
+(`PRIMER_HEALTH_TOPE_SEG`). Antes salía en el mismo instante del arranque y
+siempre decía `down`, aunque el Berry enganchara al segundo siguiente. Si algo
+no engancha, a los 30 s sale igual y dice `down`.
+
 ---
 
 ## 6. Certificados del tótem
@@ -377,7 +410,8 @@ El reporte **no** viaja colgado del POST de métricas, por dos razones:
    tiene que poder avisarlo.
 2. Arranca **antes** del bucle de conexión, porque "el Berry no engancha" es uno
    de los estados a reportar. Si esperara a que el equipo conecte, ese caso
-   nunca se informaría.
+   nunca se informaría. Lo que sí espera es a que termine el **primer intento**
+   de conexión, con un tope de 30 s (§5.3).
 
 Nunca propaga excepciones: un backend caído o un error armando el objeto no
 puede tumbar el monitoreo.
