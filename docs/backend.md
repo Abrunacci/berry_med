@@ -167,6 +167,22 @@ La sonda de temperatura del Berry ya no se usa, ni en las métricas ni en el
 
 Ejemplos en §5.1 y §5.3.
 
+### 0.11 Qué exe reporta: `instance` y `X-Berry-Instance`
+
+El `/health` suma `instance`: `<nombre de la PC>@<fecha y hora de arranque>`
+(por ejemplo `TOTEM-SANMIGUEL-06@2026-11-04T13:18:44-03:00`). El POST de
+métricas lleva el mismo valor en el header `X-Berry-Instance`; su cuerpo no
+cambia.
+
+Sirve para detectar **dos monitores reportando con el mismo `totemId`**, como
+pasó el 04/11 con el tótem 6 (una notebook de pruebas quedó prendida y mandaba
+`down` mientras el tótem mandaba `ok`). Dos `instance` distintos para un mismo
+tótem en pocos minutos son dos exe corriendo, y el válido es el que tiene
+`device.dataFresh: true`. Ver [`health.md`](health.md) §5.2.
+
+Además, el primer health al arrancar ya no sale siempre en `down`: espera a que
+termine el primer intento de conexión con el equipo (tope 30 s).
+
 ---
 
 ## 1. Panorama
@@ -236,7 +252,11 @@ HTTP Basic, en las dos rutas:
 ```http
 Authorization: Basic base64(API_USERNAME:API_PASSWORD)
 Content-Type: application/json
+X-Berry-Instance: TOTEM-SANMIGUEL-06@2026-11-04T13:18:44-03:00
 ```
+
+`X-Berry-Instance` dice qué exe mandó el POST: nombre de la PC y hora de
+arranque. Es el mismo valor que `instance` del health (§0.11).
 
 El token se arma una vez al arrancar y no rota. TLS se valida contra el almacén
 de certificados del sistema (truststore, ver `src/ssl_context.py`); en Windows,
@@ -423,6 +443,7 @@ De `tests/capturas/ocioso.bin`: todo enchufado, nadie puesto. **Es el estado del
 ```json
 {
   "totemId": "totem12",
+  "instance": "TOTEM-12@2026-11-04T08:02:10-03:00",
   "status": "ok",
   "uptimeSeconds": 3742.5,
   "device": {
@@ -578,6 +599,7 @@ ejemplo `"sólo se revisa en Windows"` si el monitor corre en Linux.
 | Qué se está midiendo | `session.measurement` |
 | Si a ese tótem se le está venciendo un certificado | `certificates.warnings` (`expired`, `daysLeft`) |
 | Qué exe tiene puesto | `build.version` y `build.commit` |
+| Si hay dos monitores reportando como el mismo tótem | Dos `instance` distintos en pocos minutos; el válido es el de `device.dataFresh: true` |
 
 ---
 

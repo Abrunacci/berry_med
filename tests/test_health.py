@@ -10,7 +10,11 @@ import json
 
 import pytest
 
-from src.health import FRAME_FRESCO_SEG, SENSOR_FRESCO_SEG, HealthReporter
+from datetime import datetime, timedelta, timezone
+
+from src.health import (
+    FRAME_FRESCO_SEG, SENSOR_FRESCO_SEG, HealthReporter, identificar_instancia,
+)
 from tests.conftest import enlace, termometro
 from tests.tramas import (
     ECG_ELECTRODO_SUELTO, ecg_params, estado_nibp, nibp_params, spo2_params,
@@ -187,7 +191,7 @@ def test_el_snapshot_es_serializable_a_json(health, parser, pusher_ok):
 def test_el_objeto_trae_todo_lo_que_el_backend_espera(health, pusher_ok):
     foto = snapshot(health, pusher_ok)
     assert set(foto) == {
-        "totemId", "status", "uptimeSeconds", "device", "pusher", "sensors",
+        "totemId", "instance", "status", "uptimeSeconds", "device", "pusher", "sensors",
         "disconnectedSensors", "expectedSensors", "sensorsWithoutPatient", "thermometer",
         "session", "certificates", "build",
     }
@@ -433,3 +437,50 @@ def test_el_build_del_exe_viaja_en_el_health(parser, reloj, pusher_ok):
                              thermometer=termometro())
     assert foto["build"] == build
     json.dumps(foto)
+
+
+# --- Instancia: qué exe es ---------------------------------------------------
+
+ARGENTINA = timezone(timedelta(hours=-3))
+
+
+def test_la_instancia_es_la_pc_y_la_hora_de_arranque():
+    ahora = datetime(2026, 11, 4, 13, 18, 44, tzinfo=ARGENTINA)
+    assert (identificar_instancia("TOTEM-SANMIGUEL-06", ahora)
+            == "TOTEM-SANMIGUEL-06@2026-11-04T13:18:44-03:00")
+
+
+def test_la_instancia_lleva_el_huso_aunque_la_hora_venga_sin_el():
+    """El backend no conoce la zona del tótem: la hora tiene que decirla."""
+    instancia = identificar_instancia("PC", datetime(2026, 11, 4, 13, 18, 44))
+    fecha = datetime.fromisoformat(instancia.split("@", 1)[1])
+    assert fecha.tzinfo is not None
+
+
+def test_sin_nombre_de_pc_la_instancia_sigue_saliendo():
+    ahora = datetime(2026, 11, 4, 13, 18, 44, tzinfo=ARGENTINA)
+    assert identificar_instancia("  ", ahora).startswith("sin-nombre@")
+
+
+def test_dos_arranques_en_la_misma_pc_son_instancias_distintas():
+    """Un reinicio cambia la instancia y deja el nombre: no es un duplicado."""
+    a = identificar_instancia("PC", datetime(2026, 11, 4, 14, 0, 1, tzinfo=ARGENTINA))
+    b = identificar_instancia("PC", datetime(2026, 11, 4, 14, 1, 12, tzinfo=ARGENTINA))
+    assert a != b and a.split("@")[0] == b.split("@")[0]
+
+
+def test_dos_pcs_con_el_mismo_totem_se_distinguen(parser, pusher_ok):
+    """El caso del 04/11: la notebook y el tótem reportaban los dos como tótem
+    6 y el backend veía ok y down intercalados sin saber de dónde venían."""
+    notebook = HealthReporter("6", parser, instance="NOTEBOOK@2026-11-04T11:37:52-03:00")
+    totem = HealthReporter("6", parser, instance="TOTEM@2026-11-04T13:18:44-03:00")
+    a = snapshot(notebook, pusher_ok)
+    b = snapshot(totem, pusher_ok)
+    assert a["totemId"] == b["totemId"]
+    assert a["instance"] != b["instance"]
+
+
+def test_la_instancia_no_cambia_entre_reportes(health, reloj, pusher_ok):
+    primero = snapshot(health, pusher_ok)["instance"]
+    reloj.avanzar(3600)
+    assert snapshot(health, pusher_ok)["instance"] == primero

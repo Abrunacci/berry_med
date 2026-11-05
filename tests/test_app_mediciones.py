@@ -205,3 +205,82 @@ def test_se_suscribe_con_los_nombres_de_la_config(app_mod, loop):
     assert {"start-ecg", "start-spo2", "start-temperature"} <= set(registrados)
     registrados["tomar-presion"]({})
     assert app.sesion.medicion == "nibp"
+
+
+# --- Identificación de la instancia y primer health ---------------------------
+
+def test_los_post_llevan_la_instancia_en_un_header(app_mod):
+    app = app_mod.VitalsMonitor.__new__(app_mod.VitalsMonitor)
+    app.auth_token = "dG90ZW06Y2xhdmU="
+    app.instance = "TOTEM@2026-11-04T13:18:44-03:00"
+    assert app._headers() == {
+        "Authorization": "Basic dG90ZW06Y2xhdmU=",
+        "Content-Type": "application/json",
+        "X-Berry-Instance": "TOTEM@2026-11-04T13:18:44-03:00",
+    }
+
+
+class _Conexion:
+    def __init__(self, state):
+        self.state = state
+
+
+class _Pusher:
+    def __init__(self, state):
+        self.connection = _Conexion(state)
+
+
+def _app_arrancando(app_mod, pusher_state="connected"):
+    app = app_mod.VitalsMonitor.__new__(app_mod.VitalsMonitor)
+    app._primer_intento = asyncio.Event()
+    app.pusher_subscriber = _Pusher(pusher_state)
+    return app
+
+
+def test_el_primer_health_espera_el_primer_intento_de_conexion(app_mod):
+    """Antes salía en el mismo instante del arranque y siempre decía `down`."""
+    app = _app_arrancando(app_mod)
+
+    async def escenario():
+        espera = asyncio.create_task(app._esperar_arranque(tope_seg=5))
+        await asyncio.sleep(0.05)
+        assert not espera.done()          # el equipo todavía está conectando
+        app._primer_intento.set()         # terminó el primer intento
+        await asyncio.wait_for(espera, timeout=1)
+
+    asyncio.run(escenario())
+
+
+def test_el_primer_health_sale_igual_si_el_equipo_no_engancha(app_mod):
+    """Si el Berry no conecta nunca, el health tiene que salir y decir down."""
+    app = _app_arrancando(app_mod)
+
+    async def escenario():
+        await asyncio.wait_for(app._esperar_arranque(tope_seg=0.1), timeout=1)
+
+    asyncio.run(escenario())
+
+
+def test_el_primer_health_espera_a_pusher_con_el_mismo_tope(app_mod):
+    app = _app_arrancando(app_mod, pusher_state="connecting")
+
+    async def escenario():
+        app._primer_intento.set()
+        espera = asyncio.create_task(app._esperar_arranque(tope_seg=5))
+        await asyncio.sleep(0.3)
+        assert not espera.done()
+        app.pusher_subscriber.connection.state = "connected"
+        await asyncio.wait_for(espera, timeout=1)
+
+    asyncio.run(escenario())
+
+
+def test_sin_pusher_el_primer_health_no_espera_de_mas(app_mod):
+    app = _app_arrancando(app_mod)
+    app.pusher_subscriber = None
+
+    async def escenario():
+        app._primer_intento.set()
+        await asyncio.wait_for(app._esperar_arranque(tope_seg=0.3), timeout=1)
+
+    asyncio.run(escenario())

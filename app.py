@@ -27,6 +27,10 @@ from src.thermometer_reader import ThermometerReader
 # La cabecera dice qué build es este (versión, commit, Python): va al log al
 # arrancar y se repite en cada archivo nuevo cuando rota. Ver src/build_info.py.
 _BUILD = obtener_build("berry-monitor")
+
+# Hasta cuánto espera el primer health a que el equipo y Pusher terminen de
+# conectar. Ver `VitalsMonitor._esperar_arranque()`.
+PRIMER_HEALTH_TOPE_SEG = 30.0
 _LOG_PATH = setup_logging("berry-monitor", cabecera=f"[BUILD] {texto_build(_BUILD)}")
 if _LOG_PATH:
     print(f"[LOG] Guardando salida en: {_LOG_PATH}")
@@ -125,6 +129,14 @@ class VitalsMonitor:
             self.credentials.get("health_expected_sensors"),
             build=_BUILD,
         )
+        # PC + hora de arranque de este exe. Va en el health (`instance`) y en
+        # el header X-Berry-Instance de cada POST, para que el backend distinga
+        # dos monitores que reportan con el mismo TOTEM_ID.
+        self.instance = self.health.instance
+        print(f"[DEBUG] Instancia: {self.instance}")
+        # El primer health espera a que termine el primer intento de conexión
+        # con el equipo (ver `_esperar_arranque()`). Lo marca `run()`.
+        self._primer_intento = asyncio.Event()
         # Última revisión de certificados del tótem, para el /health. La hace
         # `_revisar_certificados_si_toca()` una vez por día.
         self._certificados = None
@@ -285,6 +297,8 @@ class VitalsMonitor:
             print("[HEALTH] Desactivado (HEALTH_INTERVAL_SECONDS = 0)")
             return
 
+        await self._esperar_arranque()
+
         async with aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(ssl=get_ssl_context())
         ) as session:
@@ -295,8 +309,7 @@ class VitalsMonitor:
                     async with session.post(
                         self.health_url,
                         json=cuerpo,
-                        headers={"Authorization": f"Basic {self.auth_token}",
-                                 "Content-Type": "application/json"},
+                        headers=self._headers(),
                     ) as resp:
                         if resp.status not in (200, 201, 204):
                             print(f"[HEALTH] El backend respondió {resp.status}")
@@ -307,6 +320,36 @@ class VitalsMonitor:
                 except Exception as e:
                     print(f"[HEALTH] No se pudo reportar: {type(e).__name__}: {e}")
                 await asyncio.sleep(self.health_interval)
+
+    def _headers(self) -> dict:
+        """Headers de los POST al backend (métricas y health)."""
+        return {"Authorization": f"Basic {self.auth_token}",
+                "Content-Type": "application/json",
+                "X-Berry-Instance": self.instance}
+
+    async def _esperar_arranque(self, tope_seg: float = PRIMER_HEALTH_TOPE_SEG):
+        """Demora el primer health hasta que el arranque se asiente.
+
+        El health arranca antes de conectar el equipo, a propósito (ver
+        `run()`), pero un reporte armado en ese mismo instante siempre daba
+        `down`: el Berry y Pusher todavía estaban conectando. Ahora el primero
+        espera a que termine el primer intento de conexión con el equipo y a que
+        Pusher conecte, con un tope: si algo no engancha, a los `tope_seg` sale
+        igual y dice `down`, que es lo que corresponde.
+        """
+        limite = time.monotonic() + tope_seg
+        try:
+            await asyncio.wait_for(self._primer_intento.wait(), timeout=tope_seg)
+        except asyncio.TimeoutError:
+            return
+        while time.monotonic() < limite and not self._pusher_conectado():
+            await asyncio.sleep(0.2)
+
+    def _pusher_conectado(self) -> bool:
+        try:
+            return self.pusher_subscriber.connection.state == "connected"
+        except Exception:
+            return False
 
     async def _revisar_certificados_si_toca(self):
         """Revisa los certificados del tótem (ver `src/cert_check.py`).
@@ -563,10 +606,7 @@ class VitalsMonitor:
                             async with session.post(
                                 self.api_url,
                                 json=payload,
-                                headers={
-                                    "Authorization": f"Basic {self.auth_token}",
-                                    "Content-Type": "application/json",
-                                },
+                                headers=self._headers(),
                             ) as response:
                                 if response.status == 200:
                                     
@@ -701,7 +741,11 @@ class VitalsMonitor:
                 # tardó en aparecer el puerto.
                 print(f"\n[BERRY] Intento #{intento} de conectar "
                       f"(t+{time.monotonic() - arranque:.0f}s desde el arranque)")
-                connected = await self.monitor.connect()
+                try:
+                    connected = await self.monitor.connect()
+                finally:
+                    # Haya enganchado o no, el primer health ya puede salir.
+                    self._primer_intento.set()
                 if not connected:
                     print("[BERRY] Connection failed, retrying in 5 seconds...")
                     await asyncio.sleep(5)
