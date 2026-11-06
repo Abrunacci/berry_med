@@ -23,6 +23,7 @@ class ThermometerReader:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._last_parse_error_log = 0.0
+        self._last_ignored_log = 0.0
         # Puerto abierto ahora mismo, o None. Lo lee `link_status()` para el
         # /health: es lo único que dice si el termómetro está enganchado, porque
         # el equipo sólo manda datos cuando alguien se mide.
@@ -117,6 +118,12 @@ class ThermometerReader:
             value = payload.get("valor_temperatura_ir")
             unit = payload.get("unit")
             if value is None or unit is None:
+                # JSON válido pero sin la lectura: se descarta, pero se deja
+                # rastro (con tope) para poder ver qué manda el equipo.
+                now = time.time()
+                if now - self._last_ignored_log >= 5:
+                    self._last_ignored_log = now
+                    self._log(f"[THERM][WARN] Line without reading ignored: {payload}")
                 return
             parsed = {
                 "value": float(value),
@@ -125,6 +132,10 @@ class ThermometerReader:
             with self._latest_lock:
                 self._latest = parsed
             self._last_reading_t = time.monotonic()
+            # Una línea por medición: el termómetro sólo transmite cuando
+            # alguien se mide. Es lo que permite saber, desde el log del
+            # tótem, si una lectura llegó por el puerto o no llegó nunca.
+            self._log(f"[THERM] Reading received: {parsed['value']} {parsed['unit']}")
         except Exception as exc:
             now = time.time()
             if now - self._last_parse_error_log >= 5:

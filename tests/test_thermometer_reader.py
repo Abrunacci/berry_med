@@ -107,3 +107,23 @@ def test_sin_arrancar_no_esta_conectado():
     estado = lector().link_status()
     assert estado["connected"] is False
     assert estado["readerAlive"] is False
+
+
+def test_una_lectura_igual_a_la_anterior_tambien_se_toma(monkeypatch):
+    """Dos mediciones seguidas con el mismo valor: la segunda no se descarta."""
+    linea = b'{"valor_temperatura_ir": 36.5, "unit": "C"}\n'
+    r = lector()
+    r._parse_and_store(linea)
+    r.reset_latest()
+    r._parse_and_store(linea)
+    assert r.get_latest() == {"value": 36.5, "unit": "C"}
+
+
+def test_cada_lectura_queda_en_el_log():
+    """El log del tótem tiene que decir si la lectura llegó por el puerto."""
+    mensajes = []
+    r = ThermometerReader("COM9", status_callback=mensajes.append)
+    r._parse_and_store(b'{"valor_temperatura_ir": 36.5, "unit": "c"}\n')
+    r._parse_and_store(b'{"otro": 1}\n')
+    assert "[THERM] Reading received: 36.5 C" in mensajes
+    assert any("without reading ignored" in m for m in mensajes)
