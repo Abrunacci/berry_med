@@ -91,6 +91,7 @@ See [About the SSL Certificate](#about-the-ssl-certificate) for instructions.
 
 | Documento | Para qué |
 |---|---|
+| [`docs/berry-med_cambios-en-mediciones-y-health_2026-11-12.md`](docs/berry-med_cambios-en-mediciones-y-health_2026-11-12.md) | **Referencia para el backend: qué cambió** en las mediciones y el `/health` (medición por instrumento, temperatura sólo del termómetro USB, `instance` / `X-Berry-Instance` de 1.0.13) y qué revisar del lado del backend. Es el documento para mandarle al equipo de backend. |
 | [`docs/backend.md`](docs/backend.md) | **Contrato de integración con el backend**: endpoints, autenticación, los dos payloads con ejemplos reales, y los eventos de Pusher que escucha. Si lo vas a mandar al equipo de backend, la [§0](docs/backend.md#0-qué-cambia-para-el-backend) es el resumen de qué tienen que cambiar. |
 | [`docs/configuracion.md`](docs/configuracion.md) | **Todas las claves de configuración**, qué hace cada una y cómo setearlas. |
 | [`docs/health.md`](docs/health.md) | El contrato del `/health` en detalle: qué se mide y cómo se decide `ok`/`degraded`/`down`. |
