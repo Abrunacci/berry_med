@@ -1,12 +1,14 @@
-# Berry Med: cambios en mediciones y /health (29/10/2026)
+# Berry Med: cambios en mediciones y /health
 
-Resumen para el responsable del backend: sólo lo que cambia, en formato «antes
-era esto, ahora es esto». El contrato completo está en
-[`backend.md`](backend.md) (§0.9, §0.10, §5 y §6) y [`health.md`](health.md).
+29/10/2026, actualizado 11/11/2026 (1.0.13). Para el responsable del backend.
+
+Sólo lo que cambia, en formato «antes era esto, ahora es esto». El contrato
+completo está en [`backend.md`](backend.md) (§0.9, §0.10, §0.11, §5 y §6) y
+[`health.md`](health.md) (§5.2 y §5.3).
 
 **No hay cambios incompatibles**: el POST de métricas y el `/health` conservan
-todas sus claves. Hay eventos nuevos, un campo nuevo y valores que cambian de
-origen.
+todas sus claves. Hay eventos nuevos, campos nuevos, un header nuevo y valores
+que cambian de origen.
 
 ## 1. Medición por instrumento desde Pusher
 
@@ -35,10 +37,43 @@ La sonda de temperatura del propio Berry (PM6750) ya no se usa.
 | `"usb_thermometer"` | Valor posible en `disconnectedSensors` y `expectedSensors`. | **Ya no aparece en el reporte**: se informa como `"temperature"`. En la configuración del tótem se sigue aceptando como sinónimo. |
 | Bloque `thermometer` | Estado del termómetro; `expected` según `usb_thermometer`. | Misma forma, como detalle de `sensors.temperature` (puerto, error, última lectura). `expected` es el mismo que el de `sensors.temperature`; la desconexión se cuenta una sola vez. |
 
-## 3. Qué revisar en el backend
+## 3. Qué PC reporta: `instance` (1.0.13)
+
+Sirve para distinguir dos monitores que reportan con el mismo `totemId`. Pasó
+el 04/11 con el tótem 6: una notebook de prueba sin equipos y la PC del tótem
+reportaban a la vez, y el backend veía `ok, down, ok, down…` sin poder
+separarlos.
+
+| Tema | Antes (1.0.12) | Ahora (1.0.13) |
+|---|---|---|
+| `/health` → `instance` | No existía. | Campo nuevo: `<nombre de la PC>@<fecha y hora de arranque>`, hora local con su huso. Ejemplo: `TOTEM-SANMIGUEL-06@2026-11-04T13:18:44-03:00`. No cambia entre reportes; cambia en cada arranque del exe. |
+| POST de métricas | Sin forma de saber qué PC lo envió. | Header nuevo `X-Berry-Instance`, con el mismo valor que `instance`. El cuerpo no cambia. |
+| Primer health al arrancar | Salía en el mismo instante del arranque y decía siempre `down`, aunque el Berry enganchara al segundo siguiente. | Espera a que termine el primer intento de conexión con el equipo y a que Pusher conecte, con un tope de 30 s. Con el Berry bien, el primero ya sale `ok`; si algo no engancha, a los 30 s sale igual y dice `down`. |
+
+### Regla: dos `instance` distintos para un mismo `totemId`
+
+Si en pocos minutos llegan dos valores distintos de `instance` para el mismo
+`totemId`, hay dos monitores corriendo. **El válido es el que tiene
+`device.dataFresh: true`**, porque un Berry no puede estar enchufado en dos PCs
+a la vez.
+
+| A | B | Qué significa |
+|---|---|---|
+| `dataFresh: false` | `dataFresh: true` | B es el tótem. A es una PC sin equipo: hay que cerrarle el monitor o darle otro `TOTEM_ID`. |
+| `dataFresh: true` | `dataFresh: true` | Dos Berrys con el mismo `TOTEM_ID`: error de configuración, lo resuelve una persona. |
+| `dataFresh: false` | `dataFresh: false` | El tótem está caído igual, y además sobra una instancia. |
+
+Un reinicio no es un duplicado: el `instance` viejo deja de llegar y sólo queda
+el nuevo, con el mismo nombre de PC. Cada PC no ve a las otras, así que la
+detección y la alerta de duplicados se hacen en el backend.
+
+## 4. Qué revisar en el backend
 
 1. Si se alerta por `"usb_thermometer"` en `disconnectedSensors`, pasar a
    `"temperature"`.
 2. Para usar la medición por instrumento, disparar `start-<instrumento>` en
    lugar de `start-monitoring` (+ `start-blood-pressure`).
 3. Opcional: guardar `session.measurement` junto al reporte de health.
+4. Guardar `instance` con cada health y `X-Berry-Instance` con cada POST de
+   métricas, y alertar cuando un `totemId` reporte con dos `instance` a la vez,
+   indicando cuál tiene `dataFresh: true`.
